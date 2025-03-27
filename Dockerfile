@@ -33,7 +33,8 @@ RUN apt-get update && \
 COPY ./requirements.txt .
 
 # Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt uwsgi
+RUN pip3 install uwsgi
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code (isolate this change to minimize cache invalidation)
 COPY . .
