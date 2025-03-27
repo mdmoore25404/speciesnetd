@@ -59,7 +59,7 @@ COPY . .
 EXPOSE 5001
 
 # Use Python from virtual environment
-CMD ["python", "speciesnetd.py"]
+CMD ["bash", "docker-entrypoint.sh"]
 
 # For production with uWSGI (uncomment this and comment the line above)
 # CMD ["uwsgi", "--ini", "uwsgi.ini", "--plugin", "python3", "--virtualenv", "/opt/venv"]
