@@ -7,22 +7,42 @@ import json
 from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
 
-
 from speciesnet import SpeciesNet
-my_detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="detector", multiprocessing=True)
-my_classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="classifier", multiprocessing=True)
-my_ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="ensemble", multiprocessing=True)
+
+# Lazy initialization of SpeciesNet objects
+_detector = None
+_classifier = None
+_ensemble = None
+
+def get_detector():
+    global _detector
+    if _detector is None:
+        print("Initializing detector...")
+        _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="detector", multiprocessing=True)
+    return _detector
+
+def get_classifier():
+    global _classifier
+    if _classifier is None:
+        print("Initializing classifier...")
+        _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="classifier", multiprocessing=True)
+    return _classifier
+
+def get_ensemble():
+    global _ensemble
+    if _ensemble is None:
+        print("Initializing ensemble...")
+        _ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="ensemble", multiprocessing=True)
+    return _ensemble
 
 app = Flask(__name__)
 
 # Configuration
-
-# Define the tem# Specify the parent directory (must exist and be writable)
+# Specify the parent directory (must exist and be writable)
 # recommend this be an in memory temp dir
-SPECIFIC_PATH =  os.getenv("SHARED_TEMP_DIR", "/tmp/shared_temp")
+SPECIFIC_PATH = os.getenv("SHARED_TEMP_DIR", "/tmp/shared_temp")
 
-LISTEN_PORT = os.getenv("LISTEN_PORT", 5100) # port that the api listens to
-
+LISTEN_PORT = int(os.getenv("LISTEN_PORT", 5100))  # port that the api listens to
 
 # Ensure the parent directory exists
 os.makedirs(SPECIFIC_PATH, exist_ok=True)
@@ -31,23 +51,9 @@ os.makedirs(SPECIFIC_PATH, exist_ok=True)
 TEMP_DIR = tempfile.mkdtemp(dir=SPECIFIC_PATH)
 print(f"Created temp directory: {TEMP_DIR}")
 
-
-def b64_image_to_file(base64_string, filename):
-    """Convert a base64 image string to a file."""
-    try:
-        image_data = base64.b64decode(base64_string)
-    except Exception as e:
-        raise ValueError(f"Invalid base64 data: {str(e)}")
-
-    with open(filename, "wb") as f:
-        f.write(image_data)
-
 @app.route("/ensemble", methods=["POST"])
 def ensemble():
     return jsonify({"message": "Ensemble endpoint is not implemented yet."})
-    
-    
-
 
 @app.route("/classify", methods=["POST"])
 def classify():
@@ -93,21 +99,16 @@ def classify():
             for key in instance:
                 if key != "image":
                     speciesnet_instance[key] = instance[key]
-            
-            # print(f"Added instance: {speciesnet_instance}")
 
             speciesnet_payload["instances"].append(speciesnet_instance)
 
         # Send request to SpeciesNet API
         try:
-                ####speciesnet.detect(instances_dict=instances_dict, run_mode='multi_process', progress_bars=False, predictions_json=None)
-                speciesnet_result = my_classifier.ensemble(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
-                ### since filepath is always a tmpfile we can remove it from the speciesnet_result
-                for p in speciesnet_result["predictions"]:
-                    if "filepath" in p:
-                        del p["filepath"]
-                    
-                # print( json.dumps(speciesnet_result, indent=4) )
+            speciesnet_result = get_classifier().ensemble(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
+            # Since filepath is always a tmpfile we can remove it from the speciesnet_result
+            for p in speciesnet_result["predictions"]:
+                if "filepath" in p:
+                    del p["filepath"]
 
         except requests.exceptions.RequestException as e:
             abort(500, description=f"Failed to forward request to SpeciesNet API: {str(e)}")
@@ -176,22 +177,17 @@ def detect():
             for key in instance:
                 if key != "image":
                     speciesnet_instance[key] = instance[key]
-            
-            # print(f"Added instance: {speciesnet_instance}")
 
             speciesnet_payload["instances"].append(speciesnet_instance)
 
         # Send request to SpeciesNet API
         try:
-                ####speciesnet.detect(instances_dict=instances_dict, run_mode='multi_process', progress_bars=False, predictions_json=None)
-                speciesnet_result = my_detector.detect(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
-                # print(speciesnet_result)
-                ### since filepath is always a tmpfile we can remove it from the speciesnet_result
-                for p in speciesnet_result["predictions"]:
-                    if "filepath" in p:
-                        del p["filepath"]
+            speciesnet_result = get_detector().detect(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
+            # Since filepath is always a tmpfile we can remove it from the speciesnet_result
+            for p in speciesnet_result["predictions"]:
+                if "filepath" in p:
+                    del p["filepath"]
 
-                # print( json.dumps(speciesnet_result, indent=4) )
         except requests.exceptions.RequestException as e:
             abort(500, description=f"Failed to forward request to SpeciesNet API: {str(e)}")
 
@@ -212,12 +208,6 @@ def detect():
             except OSError:
                 pass
         abort(500, description=f"Server error: {str(e)}")
-
-# @app.teardown_appcontext
-# def cleanup_temp_dir(exception=None):
-#     """Clean up the temporary directory when the app shuts down."""
-#     if os.path.exists(TEMP_DIR):
-#         shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=LISTEN_PORT, debug=False)

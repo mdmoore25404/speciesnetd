@@ -1,6 +1,4 @@
 FROM ubuntu:22.04 AS builder
-RUN  mkdir -p /var/log/uwsgi/
-RUN touch  /var/log/uwsgi/speciesnetd.log
 WORKDIR /app
 RUN apt-get update && apt-get install -y python3.11 python3-pip
 COPY requirements.txt .
@@ -37,5 +35,9 @@ COPY . .
 # Expose the port
 EXPOSE 5001
 
-# Add debugging to see what's happening
-CMD ["bash", "-c", "ls -la && cat uwsgi.ini && uwsgi --ini uwsgi.ini --plugin python3"]
+# Try direct run first for debugging
+CMD ["python3", "speciesnetd.py"]
+
+# After it works with direct run, comment above line and 
+# uncomment this to use uWSGI in production
+# CMD ["uwsgi", "--ini", "uwsgi.ini"]
