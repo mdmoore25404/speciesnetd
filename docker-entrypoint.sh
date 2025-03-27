@@ -3,7 +3,7 @@
 cd /app
 
 echo "Installing speciesnet..."
-pip install "speciesnet>=4.0.3,<4.1.0"
+pip install -y "speciesnet>=4.0.3,<4.1.0"
 
 # Check if USE_UWSGI environment variable is set and not false
 if [ "${USE_UWSGI:-false}" != "false" ]; then
