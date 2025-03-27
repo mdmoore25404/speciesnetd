@@ -26,14 +26,14 @@ RUN apt-get update && \
     libsm6 \
     libxext6 \
     libxrender-dev && \
+    uwsgi && \ 
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy only requirements first to leverage Docker cache
 COPY ./requirements.txt .
 
-# Install Python dependencies
-RUN pip3 install uwsgi
+
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code (isolate this change to minimize cache invalidation)
