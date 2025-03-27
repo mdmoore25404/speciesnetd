@@ -26,10 +26,19 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+
+# Make sure pip is properly linked to python3.11
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --set python3 /usr/bin/python3.11 && \
+    python3 -m pip install --upgrade pip setuptools wheel
+
+
 # Copy requirements and install directly in the final image
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# check version
+RUN python3.11 --version
 # Install directly in the final image to verify packages exist
 RUN python3.11 -c "import sys; print('Python version:', sys.version); import flask; print('Flask version:', flask.__version__); import requests; print('Requests version:', requests.__version__); import speciesnet; print('SpeciesNet version:', speciesnet.__version__)"
 
