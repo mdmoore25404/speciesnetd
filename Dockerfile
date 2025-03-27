@@ -34,9 +34,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 # Copy requirements and install directly in the final image
 COPY requirements.txt .
-
-RUN python3.11 -m pip ---no-cache-dir -r requirements.txt
-
+RUN python3.11 -m pip  install --no-cache-dir -r requirements.txt
 
 # Verify installed packages with a more robust check
 # RUN python3.11 -c "import sys; print('Python version:', sys.version); import flask; print('Flask version:', flask.__version__); import requests; print('Requests version:', requests.__version__); import speciesnet; print('SpeciesNet module found:', speciesnet.__file__)"
