@@ -2,6 +2,7 @@
 
 cd /app
 
+echo "Installing speciesnet..."
 pip install "speciesnet>=4.0.3,<4.1.0"
 
 # Check if USE_UWSGI environment variable is set and not false
