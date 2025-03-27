@@ -59,7 +59,7 @@ jobs:
           cache-from: type=gha  # Use GitHub Actions cache
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-          compression: zstd  # Use more efficient compression
+          # compression: zstd  # Use more efficient compression
           provenance: false
       
     
