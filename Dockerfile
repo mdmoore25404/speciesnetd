@@ -1,6 +1,6 @@
 FROM ubuntu:22.04
 
-LABEL org.opencontainers.image.source="https://github.com/mdmoore25404/tcam/speciesnetd"
+LABEL org.opencontainers.image.source="https://github.com/mdmoore25404/speciesnetd"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
