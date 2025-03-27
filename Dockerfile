@@ -25,14 +25,14 @@ RUN apt-get update && \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev && \
-    uwsgi uwsgi-plugin-python3 && \ 
+    libxrender-dev \
+    uwsgi \
+    uwsgi-plugin-python3 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy only requirements first to leverage Docker cache
 COPY ./requirements.txt .
-
 
 RUN pip3 install --no-cache-dir -r requirements.txt
 
