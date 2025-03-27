@@ -1,17 +1,19 @@
-FROM ubuntu:22.04 AS builder
-WORKDIR /app
-RUN apt-get update && apt-get install -y python3.11 python3-pip
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-FROM ubuntu:22.04
+FROM ubuntu:22.04 
 WORKDIR /app
 
-# Install more complete dependencies
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    SHARED_TEMP_DIR=/tmp/shared_temp \
+    LISTEN_PORT=5001 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Install dependencies in a single stage
 RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    python3-dev \
     uwsgi \
     uwsgi-plugin-python3 \
-    python3.11 \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
@@ -24,20 +26,21 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    SHARED_TEMP_DIR=/tmp/shared_temp \
-    LISTEN_PORT=5001
+# Copy requirements and install directly in the final image
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY --from=builder /usr/local/lib/python3.11/dist-packages/ /usr/local/lib/python3.11/dist-packages/
+# Install directly in the final image to verify packages exist
+RUN python3.11 -c "import sys; print('Python version:', sys.version); import flask; print('Flask version:', flask.__version__); import requests; print('Requests version:', requests.__version__); import speciesnet; print('SpeciesNet version:', speciesnet.__version__)"
+
+# Copy application code
 COPY . .
 
 # Expose the port
 EXPOSE 5001
 
-# Try direct run first for debugging
-CMD ["python3", "speciesnetd.py"]
+# Use Python 3.11 explicitly
+CMD ["python3.11", "speciesnetd.py"]
 
-# After it works with direct run, comment above line and 
-# uncomment this to use uWSGI in production
-# CMD ["uwsgi", "--ini", "uwsgi.ini"]
+# For production with uWSGI (uncomment this and comment the line above)
+# CMD ["uwsgi", "--ini", "uwsgi.ini", "--plugin", "python311"]
