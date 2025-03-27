@@ -34,8 +34,8 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 # Copy requirements and install directly in the final image
 COPY requirements.txt .
-# --root-user-action beacuse we don't need the warning in a container
-RUN python3.11 -m pip --root-user-action install --no-cache-dir -r requirements.txt
+
+RUN python3.11 -m pip ---no-cache-dir -r requirements.txt
 
 
 # Verify installed packages with a more robust check
