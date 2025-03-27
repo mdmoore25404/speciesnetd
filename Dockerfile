@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     python3.11 \
     python3-pip \
     python3-dev \
+    python3.11-venv \
     uwsgi \
     uwsgi-plugin-python3 \
     libgl1-mesa-glx \
@@ -22,32 +23,21 @@ RUN apt-get update && apt-get install -y \
     mkdir -p /var/log/uwsgi && \
     chmod 777 /var/log/uwsgi && \
     mkdir -p /tmp/shared_temp && \
-    chmod 777 /tmp/shared_temp && \
+    chmod 777 /tmp/shared_temp && \      
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-
 # Make sure pip is properly linked to python3.11
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --set python3 /usr/bin/python3.11 && \
     python3 -m pip install --upgrade pip setuptools wheel
-
 
 # Copy requirements and install directly in the final image
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
-# check version
-RUN python3.11 --version
-# Make sure pip is properly linked to python3.11
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-    update-alternatives --set python3 /usr/bin/python3.11 && \
-    python3 -m pip install --upgrade pip setuptools wheel
-
-# check version
-RUN python3.11 --version
-# Install directly in the final image to verify packages exist
-RUN python3.11 -c "import sys; print('Python version:', sys.version); import flask; print('Flask version:', flask.__version__); import requests; print('Requests version:', requests.__version__); import speciesnet; print('SpeciesNet version:', speciesnet.__version__)"
+# Verify installed packages with a more robust check
+RUN python3.11 -c "import sys; print('Python version:', sys.version); import flask; print('Flask version:', flask.__version__); import requests; print('Requests version:', requests.__version__); import speciesnet; print('SpeciesNet module found:', speciesnet.__file__)"
 
 # Copy application code
 COPY . .
@@ -59,4 +49,4 @@ EXPOSE 5001
 CMD ["python3.11", "speciesnetd.py"]
 
 # For production with uWSGI (uncomment this and comment the line above)
-# CMD ["uwsgi", "--ini", "uwsgi.ini", "--plugin", "python311"]
+# CMD ["uwsgi", "--ini", "uwsgi.ini", "--plugin", "python3"]

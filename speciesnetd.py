@@ -4,10 +4,16 @@ import tempfile
 import shutil
 import requests
 import json
+import logging
 from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
 
 from speciesnet import SpeciesNet
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Lazy initialization of SpeciesNet objects
 _detector = None
@@ -16,22 +22,22 @@ _ensemble = None
 
 def get_detector():
     global _detector
-    if _detector is None:
-        print("Initializing detector...")
+    if (_detector is None):
+        logger.info("Initializing detector...")
         _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="detector", multiprocessing=True)
     return _detector
 
 def get_classifier():
     global _classifier
-    if _classifier is None:
-        print("Initializing classifier...")
+    if (_classifier is None):
+        logger.info("Initializing classifier...")
         _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="classifier", multiprocessing=True)
     return _classifier
 
 def get_ensemble():
     global _ensemble
-    if _ensemble is None:
-        print("Initializing ensemble...")
+    if (_ensemble is None):
+        logger.info("Initializing ensemble...")
         _ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="ensemble", multiprocessing=True)
     return _ensemble
 
@@ -49,7 +55,7 @@ os.makedirs(SPECIFIC_PATH, exist_ok=True)
 
 # Create a temporary directory under the specific path
 TEMP_DIR = tempfile.mkdtemp(dir=SPECIFIC_PATH)
-print(f"Created temp directory: {TEMP_DIR}")
+logger.info(f"Created temp directory: {TEMP_DIR}")
 
 @app.route("/ensemble", methods=["POST"])
 def ensemble():
@@ -124,6 +130,7 @@ def classify():
         return jsonify(speciesnet_result)
 
     except Exception as e:
+        logger.exception("Error in classify endpoint")
         # Clean up files in case of error
         for temp_file in temp_files:
             try:
@@ -201,6 +208,7 @@ def detect():
         return jsonify(speciesnet_result)
 
     except Exception as e:
+        logger.exception("Error in detect endpoint")
         # Clean up files in case of error
         for temp_file in temp_files:
             try:
@@ -210,4 +218,5 @@ def detect():
         abort(500, description=f"Server error: {str(e)}")
 
 if __name__ == "__main__":
+    logger.info(f"Starting Flask server on port {LISTEN_PORT}")
     app.run(host="0.0.0.0", port=LISTEN_PORT, debug=False)
