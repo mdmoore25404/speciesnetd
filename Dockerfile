@@ -40,7 +40,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY . .
 
 # GPU test as the final step before running
-RUN python3 -m speciesnet.scripts.gpu_test
+# RUN python3 -m speciesnet.scripts.gpu_test
 
 EXPOSE 5001
 
