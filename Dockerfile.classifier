@@ -1,77 +1,44 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
-    uwsgi \ 
-    procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python to not buffer output and use a reasonable heap size
+# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    MALLOC_ARENA_MAX=2 \
     PORT=5002 \
     USE_GPU=true \
-    INIT_AT_STARTUP=true \
-    SHARED_TEMP_DIR=/tmp/shared_temp
+    INIT_AT_STARTUP=false \
+    SHARED_TEMP_DIR=/tmp/shared_temp \
+    MULTIPROCESSING_SEMAPHORES=0 \
+    PYTHONPATH="/app"
 
-# Set up working directory
 WORKDIR /app
 
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Install common smaller dependencies to speed up speciesnet installation
+# Install minimal dependencies
 RUN pip install --no-cache-dir \
     numpy \
     pillow \
-    scipy \
-    pandas \
-    matplotlib \
-    opencv-python-headless \
-    shapely \
-    requests \
-    urllib3 \
-    protobuf \
-    fsspec \
-    cloudpathlib \
-    tqdm \
-    psutil \
-    python-dateutil \
-    pytz \
-    tzdata \
-    packaging \
-    typing-extensions \
-    six \
-    wheel \
-    certifi \
-    charset-normalizer \
-    idna \
-    mpmath \
-    sympy \
-    tensorboard \
-    uwsgi
+    flask \
+    gunicorn \
+    requests
 
 # Copy application files
 COPY classifierd.py common.py ./
-COPY classifierd.ini ./
+COPY run-classifier.sh ./run.sh
+RUN chmod +x run.sh
 
-# Copy and set up entrypoint script
-COPY docker-entrypoint-classifier.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Create necessary directories
-RUN mkdir -p /tmp/shared_temp
+# Create necessary directory
+RUN mkdir -p /tmp/shared_temp && chmod 1777 /tmp/shared_temp
 
 # Expose port
 EXPOSE 5002
 
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Use run.sh as entrypoint
+ENTRYPOINT ["./run.sh"]
 
 # Default command
-CMD ["uwsgi"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--timeout", "300", "--workers", "1", "classifierd:app"]

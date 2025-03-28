@@ -1,48 +1,77 @@
 """
-SpeciesNet Classifier Service
+SpeciesNet Classifier Service - Minimal Version for RunPod
 
 A dedicated microservice for species classification using the SpeciesNet classifier model.
+With lazy loading to minimize startup memory usage.
 """
 import os
 import base64
 import tempfile
 import time
-import threading
-import multiprocessing  # Add this import
-from flask import Flask, request, jsonify, abort
+import json
+import logging
+import multiprocessing
+import socket
+from flask import Flask, request, jsonify, abort, Blueprint
 
-# Import shared utilities
-from common import (setup_logging, configure_gpu, setup_multiprocessing, 
-                   create_health_blueprint)
+# Set up logging
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("classifierd")
 
-# Set up logger
-logger = setup_logging("classiferd")
-
-# Configure GPU settings
-configure_gpu() 
+# Configure GPU environment variables
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"           # Reduce TensorFlow logging
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"   # Prevent TF from grabbing all GPU memory
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"     # Match CUDA device IDs to hardware order
 
 # Get environment variables
 USE_GPU = os.getenv("USE_GPU", "true").lower() == "true"
-INIT_AT_STARTUP = os.getenv("INIT_AT_STARTUP", "true").lower() == "true"
+INIT_AT_STARTUP = os.getenv("INIT_AT_STARTUP", "false").lower() == "true"
 
-# Set multiprocessing method
-setup_multiprocessing(logger, use_gpu=USE_GPU)
+# Configure GPU environment variables
+if not USE_GPU:
+    logger.info("Disabling TensorFlow GPU via environment variable")
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-# Define GPU detection
+# Fix multiprocessing hostname issues (critical fix for Docker)
+hostname = socket.gethostname()
+os.environ['HOSTNAME'] = hostname
+os.environ['MULTIPROCESSING_AUTHKEY'] = "speciesnet_secret_key"
+
+# Use spawn method for multiprocessing
+if multiprocessing.current_process().name == 'MainProcess':
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+        logger.info("Set multiprocessing start method to 'spawn'")
+    except RuntimeError as e:
+        logger.warning(f"Could not set multiprocessing start method: {e}")
+
+# Global state
+_classifier = None
+_start_time = time.time()
+_initialization_error = None
 gpu_info = {"tensorflow": {"available": False, "device_count": 0, "error": None}}
 
 def detect_gpus():
     """Detect available TensorFlow GPUs"""
     try:
         import tensorflow as tf
+        # Get TensorFlow GPU info
         gpus = tf.config.list_physical_devices('GPU')
         gpu_info["tensorflow"]["available"] = len(gpus) > 0
         gpu_info["tensorflow"]["device_count"] = len(gpus)
         
-        # Configure TensorFlow to use GPU efficiently
-        if len(gpus) > 0:
+        # Get device names if available
+        if gpus:
+            device_details = []
             for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
+                try:
+                    # Get device details
+                    details = tf.config.experimental.get_device_details(gpu)
+                    device_details.append(details.get('device_name', str(gpu)))
+                except:
+                    device_details.append(str(gpu))
+            gpu_info["tensorflow"]["device_names"] = device_details
     except Exception as e:
         gpu_info["tensorflow"]["error"] = str(e)
         logger.warning(f"Error checking TensorFlow GPU: {e}")
@@ -50,137 +79,210 @@ def detect_gpus():
     logger.info(f"GPU detection results: {gpu_info}")
     return gpu_info
 
-# Configure GPU environment variables
-if not USE_GPU:
-    logger.info("Disabling TensorFlow GPU via environment variable")
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-
-# Detect GPUs at startup
-detect_gpus()
-
-# Import SpeciesNet after GPU configuration
-from speciesnet import SpeciesNet
-
-# Global state
-_classifier = None
-_start_time = time.time()
-_initialization_error = None
-
-def get_classifier() -> SpeciesNet:
-    """Initialize the classifier model if needed and return it"""
-    global _classifier, _initialization_error
-    if (_classifier is None):
-        logger.info("Initializing classifier...")
-        try:
-            _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
-                                  components="classifier", 
-                                  multiprocessing=True)
-            logger.info(f"Classifier initialized with TensorFlow GPU available: {gpu_info['tensorflow']['available']}")
-            _initialization_error = None
-        except Exception as e:
-            _initialization_error = str(e)
-            logger.error(f"Failed to initialize classifier: {e}")
-            # For TensorFlow, we don't have a simple CPU fallback like PyTorch
-            # It should already work with CPU if GPU isn't available
-            raise
-    return _classifier
-
 # Create Flask app
 app = Flask(__name__)
 
-# Add health endpoints
-app.register_blueprint(create_health_blueprint(
-    service_name="classifierd", 
-    start_time=_start_time,
-    model=_classifier,
-    initialization_error=_initialization_error,
-    gpu_info=gpu_info
-))
+# Create health blueprint
+health_bp = Blueprint('health', __name__)
 
-# Create temporary directory for file operations
+@health_bp.route("/health", methods=["GET"])
+def health():
+    """Health check endpoint"""
+    uptime = time.time() - _start_time
+    model_status = {"initialized": _classifier is not None}
+    if _initialization_error:
+        model_status["error"] = _initialization_error
+    
+    health_data = {
+        "status": "healthy",
+        "service": "classifierd",
+        "uptime_seconds": round(uptime, 2),
+        "gpu_info": gpu_info,
+        "model_status": model_status
+    }
+    
+    # Add speciesnet info if available
+    try:
+        import speciesnet
+        health_data["speciesnet_info"] = {
+            "version": getattr(speciesnet, "__version__", "unknown")
+        }
+    except ImportError:
+        health_data["speciesnet_info"] = "not installed"
+    
+    return jsonify(health_data)
+
+@health_bp.route("/ready", methods=["GET"])
+def ready():
+    """Readiness check endpoint"""
+    is_ready = _classifier is not None
+    if is_ready:
+        return jsonify({
+            "ready": True,
+            "service": "classifierd"
+        })
+    else:
+        message = "Model not initialized yet"
+        if _initialization_error:
+            message = f"Model initialization failed: {_initialization_error}"
+        return jsonify({
+            "ready": False,
+            "service": "classifierd",
+            "message": message
+        }), 503  # Service Unavailable
+
+app.register_blueprint(health_bp)
+
+def get_classifier():
+    """Initialize the classifier model if needed and return it"""
+    global _classifier, _initialization_error, gpu_info
+    if _classifier is None:
+        logger.info("Initializing classifier...")
+        try:
+            # Lazy import to reduce startup memory
+            from speciesnet import SpeciesNet
+            
+            # Initialize classifier
+            _classifier = SpeciesNet(
+                model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                components="classifier", 
+                multiprocessing=False
+            )
+            logger.info(f"Classifier initialized with TensorFlow GPU: {gpu_info['tensorflow']['available']}")
+            _initialization_error = None
+        except Exception as e:
+            _initialization_error = str(e)
+            logger.warning(f"Error loading classifier: {e}")
+            logger.warning("Attempting CPU-only mode")
+            
+            # Force CPU mode
+            old_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', None)
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+            
+            try:
+                # Lazy import
+                from speciesnet import SpeciesNet
+                _classifier = SpeciesNet(
+                    model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                    components="classifier", 
+                    multiprocessing=False
+                )
+                logger.info("Classifier initialized in CPU-only mode")
+                _initialization_error = None
+            except Exception as e2:
+                _initialization_error = f"Failed in both GPU and CPU modes: {str(e2)}"
+                logger.error(f"Failed in CPU mode: {e2}")
+                raise
+            finally:
+                # Restore GPU settings
+                if old_cuda_visible is not None:
+                    os.environ['CUDA_VISIBLE_DEVICES'] = old_cuda_visible
+    return _classifier
+
+# Create shared temp directory
 TEMP_DIR = tempfile.mkdtemp(dir=os.getenv("SHARED_TEMP_DIR", "/tmp/shared_temp"))
 logger.info(f"Created temp directory: {TEMP_DIR}")
 
 @app.route("/classify", methods=["POST"])
 def classify():
-    """Endpoint to run species classification on images"""
+    """Endpoint to run species classification on detected regions"""
     try:
-        # Get JSON data from the request
+        # Get request data
         data = request.get_json()
-        if not data or "instances" not in data:
-            abort(400, description="Request must contain an 'instances' array")
-
-        instances = data["instances"]
-        if not isinstance(instances, list):
-            abort(400, description="'instances' must be a list")
-
-        # Prepare payload for SpeciesNet API
-        speciesnet_payload = {"instances": []}
-        temp_files = []  # Track files to clean up later
-
-        for instance in instances:
-            if "image" not in instance:
-                abort(400, description="Each instance must contain an 'image' key with base64 data")
-
-            # Decode base64 image
-            base64_string = instance["image"]
-            try:
-                image_data = base64.b64decode(base64_string)
-            except Exception as e:
-                abort(400, description=f"Invalid base64 data: {str(e)}")
+        if not data:
+            abort(400, description="Request body is required")
+        
+        # Handle both full predictions or just detections
+        if "predictions" in data:
+            predictions = data["predictions"]
+        elif "detections" in data:
+            predictions = data["detections"]
+        else:
+            abort(400, description="Request must contain 'predictions' or 'detections'")
             
-            # Save to a temporary file
-            temp_file = tempfile.NamedTemporaryFile(
-                delete=False, dir=TEMP_DIR, suffix=".jpg"
-            )
-            temp_files.append(temp_file.name)            
+        if not isinstance(predictions, list):
+            abort(400, description="Predictions must be a list")
             
-            with open(temp_file.name, "wb") as f:
-                f.write(image_data)
-
-            # Create instance for SpeciesNet with filepath
-            speciesnet_instance = {
-                "filepath": temp_file.name
-            }
-            # Copy other metadata (e.g., country, admin1_region)
-            for key in instance:
-                if key != "image":
-                    speciesnet_instance[key] = instance[key]
-
-            speciesnet_payload["instances"].append(speciesnet_instance)
-
+        # Check if we have images or not
+        has_images = False
+        for prediction in predictions:
+            if prediction.get("image"):
+                has_images = True
+                break
+                
+        # Prepare instances
+        instances = []
+        temp_files = []
+        
+        if has_images:
+            # Process based on base64-encoded images
+            for prediction in predictions:
+                if "image" not in prediction:
+                    abort(400, description="Each prediction must contain an 'image'")
+                    
+                try:
+                    image_data = base64.b64decode(prediction["image"])
+                except Exception as e:
+                    abort(400, description=f"Invalid base64 data: {str(e)}")
+                    
+                # Save to temp file
+                temp_file = tempfile.NamedTemporaryFile(
+                    delete=False, dir=TEMP_DIR, suffix=".jpg"
+                )
+                temp_files.append(temp_file.name)
+                
+                with open(temp_file.name, "wb") as f:
+                    f.write(image_data)
+                    
+                # Create instance
+                instance = {
+                    "filepath": temp_file.name,
+                    "detections": prediction.get("detections", []),
+                }
+                
+                # Copy metadata
+                for key, value in prediction.items():
+                    if key not in ["image", "detections"]:
+                        instance[key] = value
+                        
+                instances.append(instance)
+        else:
+            # Process based on detections without images
+            instances = predictions
+            
         # Process with SpeciesNet
         try:
             classifier = get_classifier()
-            speciesnet_result = classifier.classify(
-                instances_dict=speciesnet_payload, 
-                run_mode='multi_process',
-                progress_bars=False, 
-                predictions_json=None
+            
+            # Create payload
+            payload = {"instances": instances}
+            
+            result = classifier.classify(
+                instances_dict=payload,
+                run_mode='single_process',
+                progress_bars=False
             )
             
-            # Remove temporary filepaths from results
-            for p in speciesnet_result["predictions"]:
+            # Remove filepaths from results
+            for p in result["predictions"]:
                 if "filepath" in p:
                     del p["filepath"]
-
+                    
         except Exception as e:
             abort(500, description=f"Classification error: {str(e)}")
-
-        # Clean up temporary files
+            
+        # Clean up
         for temp_file in temp_files:
             try:
                 os.remove(temp_file)
             except OSError:
                 pass
                 
-        # Return results
-        return jsonify(speciesnet_result)
-
+        return jsonify(result)
+        
     except Exception as e:
         logger.exception("Error in classify endpoint")
-        # Clean up files in case of error
+        # Clean up on error
         for temp_file in temp_files:
             try:
                 os.remove(temp_file)
@@ -188,22 +290,18 @@ def classify():
                 pass
         abort(500, description=f"Server error: {str(e)}")
 
+# Detect GPUs at startup
+detect_gpus()
+
 # Initialize classifier at startup if configured
 if INIT_AT_STARTUP:
-    def init_classifier():
-        try:
-            get_classifier()
-            logger.info("Pre-initialization complete")
-        except Exception as e:
-            logger.error(f"Pre-initialization failed: {e}")
-    
-    # Initialize in a background thread to not block server startup
-    threading.Thread(target=init_classifier, daemon=True).start()
+    try:
+        get_classifier()
+        logger.info("Pre-initialization complete")
+    except Exception as e:
+        logger.error(f"Pre-initialization failed: {e}")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5002))
-    logger.info(f"Starting classifier service on port {port}")
-    logger.info(f"GPU enabled: {USE_GPU}")
-    
-    # Start Flask server
+    logger.info(f"Starting classifier service on port {port}, GPU={USE_GPU}")
     app.run(host="0.0.0.0", port=port, debug=False)
