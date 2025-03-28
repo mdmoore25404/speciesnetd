@@ -186,6 +186,9 @@ logger.info(f"Created temp directory: {TEMP_DIR}")
 @app.route("/classify", methods=["POST"])
 def classify():
     """Endpoint to run species classification on detected regions"""
+    # Initialize temp_files list at the beginning of the function
+    temp_files = []
+    
     try:
         # Get request data
         data = request.get_json()
@@ -212,7 +215,7 @@ def classify():
                 
         # Prepare instances
         instances = []
-        temp_files = []
+        # temp_files list is now defined at the beginning of the function
         
         if has_images:
             # Process based on base64-encoded images
