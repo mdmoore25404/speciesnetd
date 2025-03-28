@@ -3,6 +3,12 @@ import os
 import sys
 import logging
 
+# TensorFlow configuration for cleaner operation
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"           # Reduce TensorFlow logging
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"   # Prevent TF from grabbing all GPU memory
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"     # Match CUDA device IDs to hardware order
+os.environ["TF_USE_CUDNN_AUTOTUNE"] = "0"          # Disable cuDNN autotuning which can cause extra warnings
+
 # Set up logging first
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -561,22 +567,39 @@ def detect():
                 pass
         abort(500, description=f"Server error: {str(e)}")
 
-# Background initialization function
+# Replace your current initialize_components function with this one
 def initialize_components():
-    """Initialize selected components in background threads based on operating mode"""
+    """Initialize selected components based on operating mode
+    
+    This function avoids using background threads to prevent TensorFlow
+    plugin registration conflicts.
+    """
     logger.info(f"Initializing components for {OPERATING_MODE} mode")
     
-    if OPERATING_MODE == "detector" or (OPERATING_MODE == "dual" and INIT_DETECTOR):
-        logger.info("Pre-initializing detector in background thread")
-        threading.Thread(target=lambda: get_detector(), daemon=True).start()
+    # Initialize components in sequence rather than in parallel threads
+    # This prevents TensorFlow from being initialized multiple times simultaneously
     
-    if OPERATING_MODE == "classifier" or (OPERATING_MODE == "dual" and INIT_CLASSIFIER):
-        logger.info("Pre-initializing classifier in background thread")
-        threading.Thread(target=lambda: get_classifier(), daemon=True).start()
-    
-    if OPERATING_MODE == "dual" and INIT_ENSEMBLE:
-        logger.info("Pre-initializing ensemble in background thread")
-        threading.Thread(target=lambda: get_ensemble(), daemon=True).start()
+    try:
+        if OPERATING_MODE == "detector" or (OPERATING_MODE == "dual" and INIT_DETECTOR):
+            logger.info("Pre-initializing detector")
+            get_detector()
+            logger.info("Detector initialization complete")
+        
+        if OPERATING_MODE == "classifier" or (OPERATING_MODE == "dual" and INIT_CLASSIFIER):
+            logger.info("Pre-initializing classifier")
+            get_classifier()
+            logger.info("Classifier initialization complete")
+        
+        if OPERATING_MODE == "dual" and INIT_ENSEMBLE:
+            logger.info("Pre-initializing ensemble")
+            get_ensemble()
+            logger.info("Ensemble initialization complete")
+            
+        logger.info("Component initialization complete")
+    except Exception as e:
+        logger.error(f"Error during component initialization: {e}")
+        # We don't re-raise the exception because we want the server to start anyway
+        # Errors are recorded in the _initialization_errors dictionary for reporting
 
 if __name__ == "__main__":
     logger.info(f"Starting Flask server on port {LISTEN_PORT}")
