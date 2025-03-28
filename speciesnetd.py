@@ -1,61 +1,72 @@
+# At the very top of your file, before any other imports
 import os
+import sys
+import logging
+
+# Set up logging first
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Environment variables for GPU control - define early
+USE_GPU_DETECTOR = os.getenv("USE_GPU_DETECTOR", "auto").lower()
+USE_GPU_CLASSIFIER = os.getenv("USE_GPU_CLASSIFIER", "auto").lower()
+
+# Prevent duplicate initialization in child processes
+# This is a critical fix to prevent code from running multiple times
+import multiprocessing
+
+# Only run initialization code in the main process
+if multiprocessing.current_process().name == 'MainProcess':
+    # Set multiprocessing start method to 'spawn' which is compatible with CUDA
+    if USE_GPU_DETECTOR == "true" or USE_GPU_CLASSIFIER == "true":
+        try:
+            if hasattr(multiprocessing, 'set_start_method'):
+                multiprocessing.set_start_method('spawn', force=True)
+                logger.info("Set multiprocessing start method to 'spawn' for CUDA compatibility")
+        except RuntimeError as e:
+            logger.warning(f"Could not set multiprocessing start method: {e}")
+
+    # Determine operating mode based on GPU settings
+    if USE_GPU_DETECTOR == "true" and USE_GPU_CLASSIFIER != "true":
+        OPERATING_MODE = "detector"
+        logger.info("Running in DETECTOR mode")
+    elif USE_GPU_CLASSIFIER == "true" and USE_GPU_DETECTOR != "true":
+        OPERATING_MODE = "classifier"
+        logger.info("Running in CLASSIFIER mode")
+    else:
+        OPERATING_MODE = "dual"
+        logger.info("Running in DUAL mode (both detector and classifier)")
+else:
+    # For child processes, just inherit these settings without logging
+    # These are here to ensure variables are defined in child processes
+    if USE_GPU_DETECTOR == "true" and USE_GPU_CLASSIFIER != "true":
+        OPERATING_MODE = "detector"
+    elif USE_GPU_CLASSIFIER == "true" and USE_GPU_DETECTOR != "true":
+        OPERATING_MODE = "classifier"
+    else:
+        OPERATING_MODE = "dual"
+
+# Continue with the rest of your imports
 import base64
 import tempfile
 import shutil
 import requests
 import json
-import logging
 import time
 import threading
 from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
-import sys
-
-
-# Add this code near the top of your file, after the imports
-import multiprocessing
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 
 # Environment variables for GPU control
 USE_GPU_DETECTOR = os.getenv("USE_GPU_DETECTOR", "auto").lower()  # "auto", "true", or "false"
 USE_GPU_CLASSIFIER = os.getenv("USE_GPU_CLASSIFIER", "auto").lower()  # "auto", "true", or "false"
 
-# Set multiprocessing start method to 'spawn' which is compatible with CUDA
-# This must be done before any multiprocessing operations
-if USE_GPU_DETECTOR == "true" or USE_GPU_CLASSIFIER == "true":
-    try:
-        # Set the start method to 'spawn' for CUDA compatibility
-        if hasattr(multiprocessing, 'set_start_method'):
-            multiprocessing.set_start_method('spawn', force=True)
-            logger.info("Set multiprocessing start method to 'spawn' for CUDA compatibility")
-    except RuntimeError as e:
-        # This can happen if the start method was already set
-        logger.warning(f"Could not set multiprocessing start method: {e}")
-
-
-
-
 # Determine which components to initialize at startup
 INIT_DETECTOR = os.getenv("INIT_DETECTOR", "true").lower() == "true"
 INIT_CLASSIFIER = os.getenv("INIT_CLASSIFIER", "true").lower() == "true"
 INIT_ENSEMBLE = os.getenv("INIT_ENSEMBLE", "false").lower() == "true"
-
-# Add this code after your existing import statements
-# Determine operating mode based on GPU settings
-if USE_GPU_DETECTOR == "true" and USE_GPU_CLASSIFIER != "true":
-    OPERATING_MODE = "detector"
-    logger.info("Running in DETECTOR mode")
-elif USE_GPU_CLASSIFIER == "true" and USE_GPU_DETECTOR != "true":
-    OPERATING_MODE = "classifier"
-    logger.info("Running in CLASSIFIER mode")
-else:
-    OPERATING_MODE = "dual"
-    logger.info("Running in DUAL mode (both detector and classifier)")
 
 # Update initialization settings based on operating mode
 if OPERATING_MODE == "detector":
