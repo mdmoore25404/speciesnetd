@@ -5,6 +5,7 @@ import shutil
 import requests
 import json
 import logging
+import time
 from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 _detector = None
 _classifier = None
 _ensemble = None
+_start_time = time.time()
 
 def get_detector() -> SpeciesNet:
     global _detector
@@ -56,6 +58,64 @@ os.makedirs(SPECIFIC_PATH, exist_ok=True)
 # Create a temporary directory under the specific path
 TEMP_DIR = tempfile.mkdtemp(dir=SPECIFIC_PATH)
 logger.info(f"Created temp directory: {TEMP_DIR}")
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Health check endpoint for monitoring and container orchestration.
+    
+    Returns:
+        JSON: Health status information including uptime and component status
+    """
+    uptime = time.time() - _start_time
+    
+    # Basic health check - we're alive
+    health_data = {
+        "status": "healthy",
+        "uptime_seconds": round(uptime, 2),
+        "temp_directory": os.path.exists(TEMP_DIR),
+        "components": {
+            "detector": _detector is not None,
+            "classifier": _classifier is not None,
+            "ensemble": _ensemble is not None
+        }
+    }
+    
+    # Add version info if available
+    try:
+        import speciesnet
+        health_data["speciesnet_info"] = {
+            "module_path": speciesnet.__file__
+        }
+    except (ImportError, AttributeError):
+        health_data["speciesnet_info"] = None
+        
+    return jsonify(health_data)
+
+# Add a readiness endpoint for container orchestration systems
+@app.route("/ready", methods=["GET"])
+def ready():
+    """Readiness check endpoint that verifies if all components are loaded.
+    
+    Returns:
+        JSON: Readiness status with component information
+    """
+    # We'll consider the service ready if at least one of the models is initialized
+    components_ready = any([_detector is not None, _classifier is not None, _ensemble is not None])
+    
+    if components_ready:
+        return jsonify({
+            "ready": True,
+            "components": {
+                "detector": _detector is not None,
+                "classifier": _classifier is not None,
+                "ensemble": _ensemble is not None
+            }
+        })
+    else:
+        return jsonify({
+            "ready": False,
+            "message": "No SpeciesNet components have been initialized yet"
+        }), 503  # Service Unavailable
 
 @app.route("/ensemble", methods=["POST"])
 def ensemble():
