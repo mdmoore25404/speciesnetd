@@ -17,7 +17,7 @@ import werkzeug.exceptions
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                   format='%(asctime)s - %(name)s - %(levelname=s - %(message)s')
 logger = logging.getLogger("classifierd")
 
 # Configure GPU environment variables
@@ -309,89 +309,112 @@ logger.info(f"Created temp directory: {TEMP_DIR}")
 
 @app.route("/classify", methods=["POST"])
 def classify():
-    """Endpoint to run species classification on detected regions"""
-    # Initialize temp_files list at the beginning of the function
+    """Endpoint to run species classification on images"""
+    # Initialize temp_files at the beginning of the function
     temp_files = []
     
     try:
-        # Get request data
+        # Get request data with better error handling
         try:
             data = request.get_json()
-            if data is None:  # This happens when JSON is invalid or Content-Type isn't application/json
-                abort(400, description="Request must be valid JSON with Content-Type: application/json")
+            if data is None and request.content_length:
+                # This means we received data but it's not valid JSON
+                raw_data = request.get_data(as_text=True)
+                preview = raw_data[:100] + '...' if len(raw_data) > 100 else raw_data
+                logger.error(f"Received invalid JSON: {preview}")
+                return jsonify({"error": "Invalid JSON format in request body"}), 400
         except werkzeug.exceptions.BadRequest as e:
-            abort(400, description="Invalid JSON in request body")
-            
-        if not data:
-            abort(400, description="Request body is required")
+            # Extract the original JSON error if available
+            error_message = str(e)
+            if hasattr(e, '__cause__') and e.__cause__ is not None:
+                error_message = f"JSON parsing error: {str(e.__cause__)}"
+            logger.error(f"Bad request: {error_message}")
+            return jsonify({"error": error_message}), 400
         
-        # Handle both full predictions or just detections
-        if "predictions" in data:
-            predictions = data["predictions"]
-        elif "detections" in data:
-            predictions = data["detections"]
-        else:
-            abort(400, description="Request must contain 'predictions' or 'detections'")
-            
-        if not isinstance(predictions, list):
-            abort(400, description="Predictions must be a list")
-            
+        if not data or "instances" not in data:
+            return jsonify({"error": "Request must contain an 'instances' array"}), 400
+
+        instances = data["instances"]
+        if not isinstance(instances, list):
+            return jsonify({"error": "'instances' must be a list"}), 400
+
+        # Prepare payload
+        speciesnet_payload = {"instances": []}
+
+        # ... rest of the function ...
+
         # Check if we have images or not
         has_images = False
-        for prediction in predictions:
-            if prediction.get("image"):
+        for instance in instances:
+            if instance.get("image"):
                 has_images = True
                 break
                 
-        # Prepare instances
-        instances = []
-        
         if has_images:
             # Process based on base64-encoded images
-            for prediction in predictions:
-                if "image" not in prediction:
-                    abort(400, description="Each prediction must contain an 'image'")
+            for instance in instances:
+                if "image" not in instance:
+                    return jsonify({"error": "Each instance must contain an 'image'"}), 400
                     
+                base64_string = instance["image"]
                 try:
-                    image_data = base64.b64decode(prediction["image"])
+                    try:
+                        # Try URL-safe first since clients always use this format
+                        image_data = base64.urlsafe_b64decode(base64_string)
+                    except Exception as e:
+                        # Fall back to standard base64 (rarely needed, but good for compatibility)
+                        logger.debug(f"URL-safe base64 decode failed, trying standard: {str(e)}")
+                        try:
+                            image_data = base64.b64decode(base64_string)
+                        except Exception as e2:
+                            logger.error(f"Base64 decoding failed: URL-safe error: {e}, standard error: {e2}")
+                            return jsonify({"error": f"Invalid base64 data: {str(e2)}"}), 400
                 except Exception as e:
-                    abort(400, description=f"Invalid base64 data: {str(e)}")
-                    
+                    logger.exception(f"Unexpected error in base64 decoding")
+                    return jsonify({"error": f"Base64 processing error: {str(e)}"}), 400
+
+                # After successful base64 decoding
+                try:
+                    # Quick validation that decoded data is actually an image
+                    from PIL import Image
+                    import io
+                    try:
+                        img = Image.open(io.BytesIO(image_data))
+                        img.verify()  # Verify it's a valid image
+                    except Exception as e:
+                        logger.warning(f"Decoded base64 is not a valid image: {str(e)}")
+                        return jsonify({"error": "Decoded data is not a valid image"}), 400
+                except ImportError:
+                    # If PIL is not available, skip this validation
+                    pass
+
                 # Save to temp file
                 temp_file = tempfile.NamedTemporaryFile(
                     delete=False, dir=TEMP_DIR, suffix=".jpg"
                 )
-                temp_files.append(temp_file.name)
-                
+                temp_files.append(temp_file.name)            
+
                 with open(temp_file.name, "wb") as f:
                     f.write(image_data)
-                    
-                # Create instance
-                instance = {
-                    "filepath": temp_file.name,
-                    "detections": prediction.get("detections", []),
-                }
-                
+
+                # Create instance for SpeciesNet classifier
+                speciesnet_instance = {"filepath": temp_file.name}
                 # Copy metadata
-                for key, value in prediction.items():
-                    if key not in ["image", "detections"]:
-                        instance[key] = value
-                        
-                instances.append(instance)
+                for key in instance:
+                    if key != "image":
+                        speciesnet_instance[key] = instance[key]
+
+                speciesnet_payload["instances"].append(speciesnet_instance)
         else:
             # Process based on detections without images
-            instances = predictions
-            
-        # Process with SpeciesNet
+            speciesnet_payload["instances"] = instances
+
+        # Process with SpeciesNet classifier
         try:
             classifier = get_classifier()
-            
-            # Create payload
-            payload = {"instances": instances}
-            
             result = classifier.classify(
-                instances_dict=payload,
-                run_mode='multi_thread',  # Using multi_thread instead of multi_process
+                instances_dict=speciesnet_payload, 
+                run_mode='multi_thread',
                 progress_bars=False
             )
             
@@ -399,10 +422,10 @@ def classify():
             for p in result["predictions"]:
                 if "filepath" in p:
                     del p["filepath"]
-                    
+
         except Exception as e:
-            abort(500, description=f"Classification error: {str(e)}")
-            
+            return jsonify({"error": f"Classification error: {str(e)}"}), 500
+
         # Clean up
         for temp_file in temp_files:
             try:
@@ -420,15 +443,12 @@ def classify():
                 os.remove(temp_file)
             except OSError:
                 pass
-                
-        # Handle specific errors with appropriate status codes
+    
+        # Return a structured error response
         if isinstance(e, werkzeug.exceptions.BadRequest):
-            abort(400, description="Invalid JSON in request body")
-        elif isinstance(e, werkzeug.exceptions.HTTPException):
-            # Re-raise HTTP exceptions (like our own aborts)
-            raise
+            return jsonify({"error": "Invalid JSON in request body"}), 400
         else:
-            abort(500, description=f"Server error: {str(e)}")
+            return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 # Detect GPUs at startup
 detect_gpus()

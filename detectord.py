@@ -210,12 +210,38 @@ def detect():
             if "image" not in instance:
                 abort(400, description="Each instance must contain an 'image' key")
 
-            # Decode base64 image
+            # Decode base64 image - try URL-safe first since that's what clients use
             base64_string = instance["image"]
             try:
-                image_data = base64.b64decode(base64_string)
+                try:
+                    # Try URL-safe first since clients always use this format
+                    image_data = base64.urlsafe_b64decode(base64_string)
+                except Exception as e:
+                    # Fall back to standard base64 (rarely needed, but good for compatibility)
+                    logger.debug(f"URL-safe base64 decode failed, trying standard: {str(e)}")
+                    try:
+                        image_data = base64.b64decode(base64_string)
+                    except Exception as e2:
+                        logger.error(f"Base64 decoding failed: URL-safe error: {e}, standard error: {e2}")
+                        return jsonify({"error": f"Invalid base64 data: {str(e2)}"}), 400
             except Exception as e:
-                return jsonify({"error": f"Invalid base64 data: {str(e)}"}), 400
+                logger.exception(f"Unexpected error in base64 decoding")
+                return jsonify({"error": f"Base64 processing error: {str(e)}"}), 400
+            
+            # After successful base64 decoding
+            try:
+                # Quick validation that decoded data is actually an image
+                from PIL import Image
+                import io
+                try:
+                    img = Image.open(io.BytesIO(image_data))
+                    img.verify()  # Verify it's a valid image
+                except Exception as e:
+                    logger.warning(f"Decoded base64 is not a valid image: {str(e)}")
+                    return jsonify({"error": "Decoded data is not a valid image"}), 400
+            except ImportError:
+                # If PIL is not available, skip this validation
+                pass
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(
