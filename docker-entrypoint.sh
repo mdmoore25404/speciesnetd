@@ -10,7 +10,7 @@ if ! pip install  "speciesnet>=4.0.3,<4.1.0"; then
     exit 1
 fi
 
-python -m speciesnet.scripts.gpu_test
+# python -m speciesnet.scripts.gpu_test
 
 
 

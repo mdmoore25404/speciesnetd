@@ -91,11 +91,36 @@ def get_detector() -> SpeciesNet:
     global _detector
     if (_detector is None):
         logger.info("Initializing detector...")
-        # FIXED: Remove use_gpu parameter
-        _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
-                             components="detector", 
-                             multiprocessing=True)
-        logger.info(f"Detector initialized with PyTorch GPU available: {gpu_info['pytorch']['available']}")
+        try:
+            # First attempt with standard initialization
+            _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                                 components="detector", 
+                                 multiprocessing=True)
+            logger.info(f"Detector initialized with PyTorch GPU available: {gpu_info['pytorch']['available']}")
+        except RuntimeError as e:
+            if any(err_msg in str(e) for err_msg in ["CUDA", "cuda", "device"]):
+                # Handle CUDA issues by forcing CPU mode
+                logger.warning(f"CUDA error encountered when loading detector: {e}")
+                logger.warning("Attempting to load detector in CPU-only mode")
+                
+                # Force CPU mode for PyTorch temporarily
+                old_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', None)
+                os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+                
+                try:
+                    _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                                         components="detector", 
+                                         multiprocessing=False)  # Disable multiprocessing to avoid shared CUDA contexts
+                    logger.info("Detector initialized in CPU-only fallback mode")
+                finally:
+                    # Restore original CUDA settings
+                    if old_cuda_visible is not None:
+                        os.environ['CUDA_VISIBLE_DEVICES'] = old_cuda_visible
+                    elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                        del os.environ['CUDA_VISIBLE_DEVICES']
+            else:
+                # Re-raise if not a CUDA issue
+                raise
     return _detector
 
 def get_classifier() -> SpeciesNet:
@@ -145,24 +170,57 @@ def health():
     """
     uptime = time.time() - _start_time
     
+    # Check if components have been initialized
+    detector_status = {"initialized": _detector is not None}
+    classifier_status = {"initialized": _classifier is not None}
+    ensemble_status = {"initialized": _ensemble is not None}
+    
+    # Add detailed error information if components have failed to initialize
+    if not detector_status["initialized"] and hasattr(get_detector, "_last_error"):
+        detector_status["error"] = str(get_detector._last_error)
+    
+    if not classifier_status["initialized"] and hasattr(get_classifier, "_last_error"):
+        classifier_status["error"] = str(get_classifier._last_error)
+    
+    if not ensemble_status["initialized"] and hasattr(get_ensemble, "_last_error"):
+        ensemble_status["error"] = str(get_ensemble._last_error)
+    
+    # Try to get GPU memory info if available
+    gpu_memory_info = {}
+    try:
+        import torch
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                mem_allocated = round(torch.cuda.memory_allocated(i) / (1024**2), 2)  # MB
+                mem_reserved = round(torch.cuda.memory_reserved(i) / (1024**2), 2)    # MB
+                gpu_memory_info[f"gpu_{i}"] = {
+                    "allocated_mb": mem_allocated,
+                    "reserved_mb": mem_reserved,
+                    "name": torch.cuda.get_device_name(i)
+                }
+    except Exception as e:
+        gpu_memory_info["error"] = str(e)
+    
     # Basic health check - we're alive
     health_data = {
         "status": "healthy",
         "uptime_seconds": round(uptime, 2),
         "temp_directory": os.path.exists(TEMP_DIR),
         "gpu_info": gpu_info,
+        "gpu_memory": gpu_memory_info,
         "gpu_settings": {
             "detector": USE_GPU_DETECTOR,
             "classifier": USE_GPU_CLASSIFIER
         },
         "components": {
-            "detector": _detector is not None,
-            "classifier": _classifier is not None,
-            "ensemble": _ensemble is not None
+            "detector": detector_status,
+            "classifier": classifier_status,
+            "ensemble": ensemble_status
         },
         "python_version": sys.version,
-        "memory_info": {
-            "available": "Unknown"  # We'll add memory info in a future enhancement
+        "environment": {
+            "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "not set"),
+            "TF_FORCE_GPU_ALLOW_GROWTH": os.environ.get("TF_FORCE_GPU_ALLOW_GROWTH", "not set")
         }
     }
     
@@ -170,8 +228,22 @@ def health():
     try:
         import speciesnet
         health_data["speciesnet_info"] = {
-            "module_path": speciesnet.__file__
+            "module_path": speciesnet.__file__,
+            "version": getattr(speciesnet, "__version__", "unknown")
         }
+        
+        # Add pytorch/tensorflow version info
+        try:
+            import torch
+            health_data["torch_version"] = torch.__version__
+        except ImportError:
+            pass
+            
+        try:
+            import tensorflow as tf
+            health_data["tensorflow_version"] = tf.__version__
+        except ImportError:
+            pass
     except (ImportError, AttributeError):
         health_data["speciesnet_info"] = None
         
