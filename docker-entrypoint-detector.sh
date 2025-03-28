@@ -35,6 +35,8 @@ _term() {
 
 trap _term SIGTERM SIGINT
 
+pip install speciesnet
+
 # Execute the command passed to the script or use the default
 if [ "$1" = "flask" ]; then
   echo "Starting Flask development server"
