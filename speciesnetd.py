@@ -8,13 +8,70 @@ import logging
 import time
 from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
-
-from speciesnet import SpeciesNet
+import sys
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Environment variables for GPU control
+USE_GPU_DETECTOR = os.getenv("USE_GPU_DETECTOR", "auto").lower()  # "auto", "true", or "false"
+USE_GPU_CLASSIFIER = os.getenv("USE_GPU_CLASSIFIER", "auto").lower()  # "auto", "true", or "false"
+
+# GPU detection results
+gpu_info = {
+    "pytorch": {"available": False, "device_count": 0, "error": None},
+    "tensorflow": {"available": False, "device_count": 0, "error": None}
+}
+
+# Detect available GPUs
+def detect_gpus():
+    # Check PyTorch GPUs
+    try:
+        import torch
+        gpu_info["pytorch"]["available"] = torch.cuda.is_available()
+        gpu_info["pytorch"]["device_count"] = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        if torch.cuda.is_available():
+            gpu_info["pytorch"]["device_name"] = torch.cuda.get_device_name(0)
+    except Exception as e:
+        gpu_info["pytorch"]["error"] = str(e)
+        logger.warning(f"Error checking PyTorch GPU: {e}")
+
+    # Check TensorFlow GPUs
+    try:
+        import tensorflow as tf
+        gpus = tf.config.list_physical_devices('GPU')
+        gpu_info["tensorflow"]["available"] = len(gpus) > 0
+        gpu_info["tensorflow"]["device_count"] = len(gpus)
+        
+        # If TensorFlow sees GPUs but PyTorch should use them
+        if len(gpus) > 0 and USE_GPU_DETECTOR == "true" and USE_GPU_CLASSIFIER != "true":
+            logger.info("Restricting TensorFlow GPU access to allow PyTorch to use GPUs")
+            # Prevent TensorFlow from using all GPU memory
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            if USE_GPU_CLASSIFIER == "false":
+                logger.info("Disabling TensorFlow GPU access completely")
+                tf.config.set_visible_devices([], 'GPU')
+                
+    except Exception as e:
+        gpu_info["tensorflow"]["error"] = str(e)
+        logger.warning(f"Error checking TensorFlow GPU: {e}")
+    
+    logger.info(f"GPU detection results: {gpu_info}")
+    return gpu_info
+
+# Detect GPUs at startup
+detect_gpus()
+
+# Configure SpeciesNet import based on GPU settings
+if USE_GPU_DETECTOR == "false" and USE_GPU_CLASSIFIER == "false":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    logger.info("Disabled GPU access for both PyTorch and TensorFlow")
+
+# Import SpeciesNet after GPU configuration
+from speciesnet import SpeciesNet
 
 # Lazy initialization of SpeciesNet objects
 _detector = None
@@ -26,21 +83,41 @@ def get_detector() -> SpeciesNet:
     global _detector
     if (_detector is None):
         logger.info("Initializing detector...")
-        _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="detector", multiprocessing=True)
+        # Use GPU for detector based on settings
+        use_gpu = USE_GPU_DETECTOR == "true" or (USE_GPU_DETECTOR == "auto" and gpu_info["pytorch"]["available"])
+        _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                              components="detector", 
+                              multiprocessing=True,
+                              use_gpu=use_gpu)
+        logger.info(f"Detector initialized with GPU: {use_gpu}")
     return _detector
 
 def get_classifier() -> SpeciesNet:
     global _classifier
     if (_classifier is None):
         logger.info("Initializing classifier...")
-        _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="classifier", multiprocessing=True)
+        # Use GPU for classifier based on settings
+        use_gpu = USE_GPU_CLASSIFIER == "true" or (USE_GPU_CLASSIFIER == "auto" and gpu_info["tensorflow"]["available"])
+        _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                                components="classifier", 
+                                multiprocessing=True,
+                                use_gpu=use_gpu)
+        logger.info(f"Classifier initialized with GPU: {use_gpu}")
     return _classifier
 
 def get_ensemble() -> SpeciesNet:
     global _ensemble
     if (_ensemble is None):
         logger.info("Initializing ensemble...")
-        _ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="ensemble", multiprocessing=True)
+        # Use both or prioritize detector (PyTorch) for ensemble
+        use_gpu = (USE_GPU_DETECTOR == "true" or USE_GPU_CLASSIFIER == "true" or 
+                   (USE_GPU_DETECTOR == "auto" and gpu_info["pytorch"]["available"]) or
+                   (USE_GPU_CLASSIFIER == "auto" and gpu_info["tensorflow"]["available"]))
+        _ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
+                             components="ensemble", 
+                             multiprocessing=True,
+                             use_gpu=use_gpu)
+        logger.info(f"Ensemble initialized with GPU: {use_gpu}")
     return _ensemble
 
 app = Flask(__name__)
@@ -73,10 +150,19 @@ def health():
         "status": "healthy",
         "uptime_seconds": round(uptime, 2),
         "temp_directory": os.path.exists(TEMP_DIR),
+        "gpu_info": gpu_info,
+        "gpu_settings": {
+            "detector": USE_GPU_DETECTOR,
+            "classifier": USE_GPU_CLASSIFIER
+        },
         "components": {
             "detector": _detector is not None,
             "classifier": _classifier is not None,
             "ensemble": _ensemble is not None
+        },
+        "python_version": sys.version,
+        "memory_info": {
+            "available": "Unknown"  # We'll add memory info in a future enhancement
         }
     }
     
@@ -279,4 +365,5 @@ def detect():
 
 if __name__ == "__main__":
     logger.info(f"Starting Flask server on port {LISTEN_PORT}")
+    logger.info(f"GPU settings: detector={USE_GPU_DETECTOR}, classifier={USE_GPU_CLASSIFIER}")
     app.run(host="0.0.0.0", port=LISTEN_PORT, debug=False)
