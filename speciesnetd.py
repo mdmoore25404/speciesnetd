@@ -20,21 +20,21 @@ _detector = None
 _classifier = None
 _ensemble = None
 
-def get_detector():
+def get_detector() -> SpeciesNet:
     global _detector
     if (_detector is None):
         logger.info("Initializing detector...")
         _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="detector", multiprocessing=True)
     return _detector
 
-def get_classifier():
+def get_classifier() -> SpeciesNet:
     global _classifier
     if (_classifier is None):
         logger.info("Initializing classifier...")
         _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", components="classifier", multiprocessing=True)
     return _classifier
 
-def get_ensemble():
+def get_ensemble() -> SpeciesNet:
     global _ensemble
     if (_ensemble is None):
         logger.info("Initializing ensemble...")
@@ -110,7 +110,7 @@ def classify():
 
         # Send request to SpeciesNet API
         try:
-            speciesnet_result = get_classifier().ensemble(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
+            speciesnet_result = get_classifier().classify(instances_dict=speciesnet_payload, run_mode='multi_process', progress_bars=False, predictions_json=None)
             # Since filepath is always a tmpfile we can remove it from the speciesnet_result
             for p in speciesnet_result["predictions"]:
                 if "filepath" in p:
