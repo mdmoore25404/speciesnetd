@@ -222,7 +222,7 @@ def detect():
             detector = get_detector()
             result = detector.detect(
                 instances_dict=speciesnet_payload, 
-                run_mode='single_process',
+                run_mode='multi_thread',
                 progress_bars=False
             )
             

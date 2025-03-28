@@ -259,7 +259,7 @@ def classify():
             
             result = classifier.classify(
                 instances_dict=payload,
-                run_mode='single_process',
+                run_mode='multi_thread',
                 progress_bars=False
             )
             
