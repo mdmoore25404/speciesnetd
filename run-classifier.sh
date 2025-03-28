@@ -10,5 +10,15 @@ chmod 1777 /tmp/shared_temp
 # Install SpeciesNet if needed - pip will skip if already installed
 pip install --no-cache-dir speciesnet || echo "Warning: Could not install speciesnet"
 
+
+echo "TENSORFLOW VERSION"
+
+pip show tensorflow
+
+
+echo "CHECKING GPU"
+
+python gpu_test.py
+
 # Run the application
 exec "$@"
