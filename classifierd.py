@@ -17,7 +17,7 @@ import werkzeug.exceptions
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname=s - %(message)s')
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("classifierd")
 
 # Configure GPU environment variables
@@ -331,12 +331,20 @@ def classify():
             logger.error(f"Bad request: {error_message}")
             return jsonify({"error": error_message}), 400
         
-        if not data or "instances" not in data:
-            return jsonify({"error": "Request must contain an 'instances' array"}), 400
+        # Check for detections (primary) or instances (fallback) in the payload
+        if not data:
+            return jsonify({"error": "Request body cannot be empty"}), 400
 
-        instances = data["instances"]
+        # Look for 'detections' first, then fall back to 'instances' if needed
+        if "detections" in data:
+            instances = data["detections"]
+        elif "instances" in data:
+            instances = data["instances"]
+        else:
+            return jsonify({"error": "Request must contain a 'detections' array"}), 400
+            
         if not isinstance(instances, list):
-            return jsonify({"error": "'instances' must be a list"}), 400
+            return jsonify({"error": "'detections' must be a list"}), 400
 
         # Prepare payload
         speciesnet_payload = {"instances": []}
