@@ -1,5 +1,5 @@
 # Use NVIDIA's TensorFlow image which comes with proper GPU support
-FROM tensorflow/tensorflow:2.15.1-gpu
+FROM tensorflow/tensorflow:2.15.0-gpu
 
 # Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
