@@ -11,14 +11,34 @@ from flask import Flask, request, jsonify, abort
 from werkzeug.utils import secure_filename
 import sys
 
+
+# Add this code near the top of your file, after the imports
+import multiprocessing
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 # Environment variables for GPU control
 USE_GPU_DETECTOR = os.getenv("USE_GPU_DETECTOR", "auto").lower()  # "auto", "true", or "false"
 USE_GPU_CLASSIFIER = os.getenv("USE_GPU_CLASSIFIER", "auto").lower()  # "auto", "true", or "false"
+
+# Set multiprocessing start method to 'spawn' which is compatible with CUDA
+# This must be done before any multiprocessing operations
+if USE_GPU_DETECTOR == "true" or USE_GPU_CLASSIFIER == "true":
+    try:
+        # Set the start method to 'spawn' for CUDA compatibility
+        if hasattr(multiprocessing, 'set_start_method'):
+            multiprocessing.set_start_method('spawn', force=True)
+            logger.info("Set multiprocessing start method to 'spawn' for CUDA compatibility")
+    except RuntimeError as e:
+        # This can happen if the start method was already set
+        logger.warning(f"Could not set multiprocessing start method: {e}")
+
+
+
 
 # Determine which components to initialize at startup
 INIT_DETECTOR = os.getenv("INIT_DETECTOR", "true").lower() == "true"
@@ -131,15 +151,22 @@ def get_detector() -> SpeciesNet:
         logger.info("Initializing detector...")
         try:
             # First attempt with standard initialization
+            # If GPU is requested but we're using 'fork' method, use multiprocessing=False
+            use_multiprocessing = True
+            if USE_GPU_DETECTOR == "true" and multiprocessing.get_start_method(allow_none=True) == 'fork':
+                logger.warning("CUDA with 'fork' multiprocessing detected; disabling multiprocessing for detector")
+                use_multiprocessing = False
+                
             _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
                                  components="detector", 
-                                 multiprocessing=True)
-            logger.info(f"Detector initialized with PyTorch GPU available: {gpu_info['pytorch']['available']}")
+                                 multiprocessing=use_multiprocessing)
+            logger.info(f"Detector initialized with PyTorch GPU available: {gpu_info['pytorch']['available']}, multiprocessing: {use_multiprocessing}")
         except Exception as e:
             _initialization_errors["detector"] = str(e)
-            if any(err_msg in str(e) for err_msg in ["CUDA", "cuda", "device"]):
+            # Check for both CUDA errors and multiprocessing errors
+            if any(err_msg in str(e) for err_msg in ["CUDA", "cuda", "device", "subprocess", "multiprocessing"]):
                 # Handle CUDA issues by forcing CPU mode
-                logger.warning(f"CUDA error encountered when loading detector: {e}")
+                logger.warning(f"CUDA/multiprocessing error encountered when loading detector: {e}")
                 logger.warning("Attempting to load detector in CPU-only mode")
                 
                 # Force CPU mode for PyTorch temporarily
@@ -149,7 +176,7 @@ def get_detector() -> SpeciesNet:
                 try:
                     _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
                                          components="detector", 
-                                         multiprocessing=False)  # Disable multiprocessing to avoid shared CUDA contexts
+                                         multiprocessing=False)  # Always disable multiprocessing in fallback mode
                     logger.info("Detector initialized in CPU-only fallback mode")
                     _initialization_errors["detector"] = None  # Clear the error since we succeeded in CPU mode
                 except Exception as e2:
