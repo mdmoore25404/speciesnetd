@@ -1,0 +1,41 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python to not buffer output and use a reasonable heap size
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    MALLOC_ARENA_MAX=2 \
+    PORT=5002 \
+    USE_GPU=true \
+    INIT_AT_STARTUP=true \
+    SHARED_TEMP_DIR=/tmp/shared_temp
+
+# Set up working directory
+WORKDIR /app
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt uwsgi
+
+# Copy application files
+COPY classifierd.py common.py ./
+COPY classifierd.ini ./
+
+# Create necessary directories
+RUN mkdir -p /tmp/shared_temp
+
+# Expose port
+EXPOSE 5002
+
+# Run uWSGI server
+CMD ["uwsgi", "--ini", "classifierd.ini"]

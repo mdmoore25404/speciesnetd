@@ -1,0 +1,56 @@
+version: '3'
+
+services:
+  detector:
+    build:
+      context: .
+      dockerfile: Dockerfile.detector
+    ports:
+      - "5001:5001"
+    environment:
+      - USE_GPU=true
+      - INIT_AT_STARTUP=true
+      - PORT=5001
+    volumes:
+      - shared-temp:/tmp/shared_temp
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  classifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.classifier
+    ports:
+      - "5002:5002"
+    environment:
+      - USE_GPU=true
+      - INIT_AT_STARTUP=true
+      - PORT=5002
+    volumes:
+      - shared-temp:/tmp/shared_temp
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # Optional API gateway with Nginx
+  api-gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    depends_on:
+      - detector
+      - classifier
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+
+volumes:
+  shared-temp:
