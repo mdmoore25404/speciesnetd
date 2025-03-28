@@ -23,9 +23,16 @@ WORKDIR /app
 # Fix for blinker issue - remove it completely first
 RUN pip uninstall -y blinker || true
 
-# Install minimal dependencies with --no-deps flag to avoid dependency resolution problems
+# Install Flask dependencies first
 RUN pip install --no-cache-dir --no-deps \
     blinker>=1.9.0 \
+    itsdangerous>=2.2.0 \
+    Jinja2>=3.1.2 \
+    Werkzeug>=3.0.0 \
+    click>=8.1.3
+
+# Install main packages
+RUN pip install --no-cache-dir --no-deps \
     numpy \
     pillow \
     flask \
