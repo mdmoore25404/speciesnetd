@@ -8,6 +8,7 @@ import base64
 import tempfile
 import time
 import threading
+import multiprocessing  # Add this import
 from flask import Flask, request, jsonify, abort
 
 # Import shared utilities

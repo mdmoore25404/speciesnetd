@@ -26,11 +26,15 @@ def configure_gpu():
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"     # Match CUDA device IDs to hardware order
     os.environ["TF_USE_CUDNN_AUTOTUNE"] = "0"          # Disable cuDNN autotuning
 
+# In the setup_multiprocessing function
 def setup_multiprocessing(logger, use_gpu=False):
     """Set up multiprocessing with the appropriate start method for CUDA"""
     if use_gpu and multiprocessing.current_process().name == 'MainProcess':
         try:
-            if hasattr(multiprocessing, 'set_start_method'):
+            current_method = multiprocessing.get_start_method(allow_none=True)
+            logger.info(f"Current multiprocessing start method: {current_method}")
+            
+            if current_method != 'spawn' and hasattr(multiprocessing, 'set_start_method'):
                 multiprocessing.set_start_method('spawn', force=True)
                 logger.info("Set multiprocessing start method to 'spawn' for CUDA compatibility")
         except RuntimeError as e:

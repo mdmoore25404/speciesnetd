@@ -35,8 +35,13 @@ _term() {
 
 trap _term SIGTERM SIGINT
 
-
-pip install speciesnet
+# Check if speciesnet is installed before attempting to install it
+if ! pip show speciesnet &>/dev/null; then
+  echo "Installing speciesnet package..."
+  pip install speciesnet
+else
+  echo "SpeciesNet package is already installed."
+fi
 
 # Execute the command passed to the script or use the default
 if [ "$1" = "flask" ]; then
