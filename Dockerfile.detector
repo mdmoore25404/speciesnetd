@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir \
 
 # Copy application files
 COPY detectord.py common.py ./
-COPY run.sh ./
+COPY run-detector.sh ./
 RUN chmod +x run.sh
 
 # Create necessary directory
