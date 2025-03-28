@@ -278,19 +278,66 @@ def detect():
 
 @app.route("/debug_request", methods=["POST"])
 def debug_request():
-    """Debug endpoint to echo back request details"""
+    """Debug endpoint to echo back request details with detailed JSON error analysis"""
+    response_data = {
+        "content_type": request.content_type,
+        "content_length": request.content_length,
+        "headers": dict(request.headers),
+        "json_status": "unknown"
+    }
+    
+    # Get raw request data
     try:
         raw_data = request.get_data(as_text=True)
-        json_data = request.get_json(silent=True)
-        return jsonify({
-            "raw_data": raw_data[:1000],  # Limit to first 1000 chars 
-            "content_type": request.content_type,
-            "content_length": request.content_length,
-            "parsed_json": json_data,
-            "headers": dict(request.headers)
-        })
+        response_data["raw_data_preview"] = raw_data[:200] + "..." if len(raw_data) > 200 else raw_data
+        response_data["raw_data_length"] = len(raw_data)
+        
+        # Check for special characters in raw data
+        suspicious_chars = []
+        for i, char in enumerate(raw_data[:1000]):  # Check first 1000 chars
+            if not char.isprintable() or char in ['"', '\\']:
+                suspicious_chars.append({
+                    "position": i,
+                    "char": repr(char),
+                    "ord": ord(char),
+                    "context": raw_data[max(0, i-10):min(len(raw_data), i+10)]
+                })
+        
+        if suspicious_chars:
+            response_data["suspicious_characters"] = suspicious_chars[:20]  # Limit to first 20
+    
+        # Try to parse JSON
+        try:
+            json_data = json.loads(raw_data)
+            response_data["json_status"] = "valid"
+            response_data["json_structure"] = {
+                "top_level_keys": list(json_data.keys()) if isinstance(json_data, dict) else "not a dict",
+                "instances_count": len(json_data.get("instances", [])) if isinstance(json_data, dict) else 0
+            }
+        except json.JSONDecodeError as e:
+            response_data["json_status"] = "invalid"
+            response_data["json_error"] = {
+                "message": str(e),
+                "line": e.lineno,
+                "column": e.colno,
+                "position": e.pos,
+                "error_type": e.__class__.__name__
+            }
+            
+            # Show context around error position
+            if hasattr(e, 'pos') and e.pos < len(raw_data):
+                start = max(0, e.pos - 50)
+                end = min(len(raw_data), e.pos + 50)
+                response_data["error_context"] = {
+                    "before": raw_data[start:e.pos],
+                    "position": e.pos,
+                    "character_at_position": repr(raw_data[e.pos]) if e.pos < len(raw_data) else None,
+                    "after": raw_data[e.pos:end]
+                }
     except Exception as e:
-        return jsonify({"error": str(e)})
+        response_data["error"] = str(e)
+    
+    return jsonify(response_data)
 
 # Detect GPUs at startup
 detect_gpus()
