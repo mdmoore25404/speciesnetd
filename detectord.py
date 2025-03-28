@@ -179,8 +179,23 @@ def detect():
     temp_files = []
     
     try:
-        # Get request data
-        data = request.get_json()
+        # Get request data with better error handling
+        try:
+            data = request.get_json()
+            if data is None and request.content_length:
+                # This means we received data but it's not valid JSON
+                raw_data = request.get_data(as_text=True)
+                preview = raw_data[:100] + '...' if len(raw_data) > 100 else raw_data
+                logger.error(f"Received invalid JSON: {preview}")
+                abort(400, description="Invalid JSON format in request body")
+        except werkzeug.exceptions.BadRequest as e:
+            # Extract the original JSON error if available
+            error_message = str(e)
+            if hasattr(e, '__cause__') and e.__cause__ is not None:
+                error_message = f"JSON parsing error: {e.__cause__}"
+            logger.error(f"Bad request: {error_message}")
+            abort(400, description=error_message)
+        
         if not data or "instances" not in data:
             abort(400, description="Request must contain an 'instances' array")
 
@@ -260,6 +275,22 @@ def detect():
             abort(400, description="Invalid JSON in request body")
         else:
             abort(500, description=f"Server error: {str(e)}")
+
+@app.route("/debug_request", methods=["POST"])
+def debug_request():
+    """Debug endpoint to echo back request details"""
+    try:
+        raw_data = request.get_data(as_text=True)
+        json_data = request.get_json(silent=True)
+        return jsonify({
+            "raw_data": raw_data[:1000],  # Limit to first 1000 chars 
+            "content_type": request.content_type,
+            "content_length": request.content_length,
+            "parsed_json": json_data,
+            "headers": dict(request.headers)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 # Detect GPUs at startup
 detect_gpus()
