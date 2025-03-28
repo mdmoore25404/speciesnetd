@@ -32,6 +32,14 @@ INIT_AT_STARTUP = os.getenv("INIT_AT_STARTUP", "false").lower() == "true"
 if not USE_GPU:
     logger.info("Disabling TensorFlow GPU via environment variable")
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+else:
+    # Explicitly enable GPU
+    logger.info("Explicitly enabling TensorFlow GPU")
+    # Make sure this environment variable is not set to -1
+    if os.environ.get("CUDA_VISIBLE_DEVICES") == "-1":
+        del os.environ["CUDA_VISIBLE_DEVICES"]
+    # Force TensorFlow to use GPU
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Fix multiprocessing hostname issues (critical fix for Docker)
 hostname = socket.gethostname()
@@ -56,13 +64,29 @@ def detect_gpus():
     """Detect available TensorFlow GPUs"""
     try:
         import tensorflow as tf
+        # Print TensorFlow version for debugging
+        logger.info(f"TensorFlow version: {tf.__version__}")
+        
+        # Force device placement logging
+        tf.debugging.set_log_device_placement(True)
+        
         # Get TensorFlow GPU info
         gpus = tf.config.list_physical_devices('GPU')
+        logger.info(f"TensorFlow physical GPUs: {gpus}")
+        
         gpu_info["tensorflow"]["available"] = len(gpus) > 0
         gpu_info["tensorflow"]["device_count"] = len(gpus)
         
         # Get device names if available
         if gpus:
+            # Enable memory growth to prevent TF from grabbing all memory
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    logger.info(f"Enabled memory growth for GPU {gpu}")
+                except Exception as e:
+                    logger.warning(f"Could not set memory growth for GPU {gpu}: {e}")
+                    
             device_details = []
             for gpu in gpus:
                 try:
@@ -72,6 +96,14 @@ def detect_gpus():
                 except:
                     device_details.append(str(gpu))
             gpu_info["tensorflow"]["device_names"] = device_details
+            
+            # Test GPU with a simple computation
+            with tf.device('/GPU:0'):
+                a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
+                b = tf.constant([[1.0, 1.0], [1.0, 1.0]])
+                c = tf.matmul(a, b)
+                logger.info(f"Simple GPU test result: {c}")
+                gpu_info["tensorflow"]["test_passed"] = True
     except Exception as e:
         gpu_info["tensorflow"]["error"] = str(e)
         logger.warning(f"Error checking TensorFlow GPU: {e}")
@@ -141,6 +173,19 @@ def get_classifier():
         try:
             # Lazy import to reduce startup memory
             from speciesnet import SpeciesNet
+            import tensorflow as tf
+            
+            # Configure TensorFlow to use GPU if available
+            if USE_GPU:
+                logger.info("Configuring TensorFlow for GPU usage")
+                gpus = tf.config.list_physical_devices('GPU')
+                if gpus:
+                    # Set memory growth
+                    for gpu in gpus:
+                        try:
+                            tf.config.experimental.set_memory_growth(gpu, True)
+                        except Exception as e:
+                            logger.warning(f"Could not set memory growth: {e}")
             
             # Initialize classifier
             _classifier = SpeciesNet(
