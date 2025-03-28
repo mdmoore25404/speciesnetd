@@ -187,21 +187,21 @@ def detect():
                 raw_data = request.get_data(as_text=True)
                 preview = raw_data[:100] + '...' if len(raw_data) > 100 else raw_data
                 logger.error(f"Received invalid JSON: {preview}")
-                abort(400, description="Invalid JSON format in request body")
+                return jsonify({"error": "Invalid JSON format in request body"}), 400
         except werkzeug.exceptions.BadRequest as e:
             # Extract the original JSON error if available
             error_message = str(e)
             if hasattr(e, '__cause__') and e.__cause__ is not None:
-                error_message = f"JSON parsing error: {e.__cause__}"
+                error_message = f"JSON parsing error: {str(e.__cause__)}"
             logger.error(f"Bad request: {error_message}")
-            abort(400, description=error_message)
+            return jsonify({"error": error_message}), 400
         
         if not data or "instances" not in data:
-            abort(400, description="Request must contain an 'instances' array")
+            return jsonify({"error": "Request must contain an 'instances' array"}), 400
 
         instances = data["instances"]
         if not isinstance(instances, list):
-            abort(400, description="'instances' must be a list")
+            return jsonify({"error": "'instances' must be a list"}), 400
 
         # Prepare payload
         speciesnet_payload = {"instances": []}
@@ -215,7 +215,7 @@ def detect():
             try:
                 image_data = base64.b64decode(base64_string)
             except Exception as e:
-                abort(400, description=f"Invalid base64 data: {str(e)}")
+                return jsonify({"error": f"Invalid base64 data: {str(e)}"}), 400
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(
@@ -250,7 +250,7 @@ def detect():
                     del p["filepath"]
 
         except Exception as e:
-            abort(500, description=f"Detection error: {str(e)}")
+            return jsonify({"error": f"Detection error: {str(e)}"}), 500
 
         # Clean up
         for temp_file in temp_files:
@@ -270,11 +270,11 @@ def detect():
             except OSError:
                 pass
         
-        # Handle the specific JSON parsing error
+        # Return a structured error response
         if isinstance(e, werkzeug.exceptions.BadRequest):
-            abort(400, description="Invalid JSON in request body")
+            return jsonify({"error": "Invalid JSON in request body"}), 400
         else:
-            abort(500, description=f"Server error: {str(e)}")
+            return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 @app.route("/debug_request", methods=["POST"])
 def debug_request():
