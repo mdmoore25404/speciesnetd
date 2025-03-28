@@ -13,6 +13,7 @@ import logging
 import multiprocessing
 import socket
 from flask import Flask, request, jsonify, abort, Blueprint
+import werkzeug.exceptions
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -314,7 +315,13 @@ def classify():
     
     try:
         # Get request data
-        data = request.get_json()
+        try:
+            data = request.get_json()
+            if data is None:  # This happens when JSON is invalid or Content-Type isn't application/json
+                abort(400, description="Request must be valid JSON with Content-Type: application/json")
+        except werkzeug.exceptions.BadRequest as e:
+            abort(400, description="Invalid JSON in request body")
+            
         if not data:
             abort(400, description="Request body is required")
         
@@ -338,7 +345,6 @@ def classify():
                 
         # Prepare instances
         instances = []
-        # temp_files list is now defined at the beginning of the function
         
         if has_images:
             # Process based on base64-encoded images
@@ -414,7 +420,15 @@ def classify():
                 os.remove(temp_file)
             except OSError:
                 pass
-        abort(500, description=f"Server error: {str(e)}")
+                
+        # Handle specific errors with appropriate status codes
+        if isinstance(e, werkzeug.exceptions.BadRequest):
+            abort(400, description="Invalid JSON in request body")
+        elif isinstance(e, werkzeug.exceptions.HTTPException):
+            # Re-raise HTTP exceptions (like our own aborts)
+            raise
+        else:
+            abort(500, description=f"Server error: {str(e)}")
 
 # Detect GPUs at startup
 detect_gpus()

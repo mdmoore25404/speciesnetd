@@ -13,6 +13,7 @@ import logging
 import multiprocessing
 import socket
 from flask import Flask, request, jsonify, abort, Blueprint
+import werkzeug.exceptions
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -174,6 +175,9 @@ logger.info(f"Created temp directory: {TEMP_DIR}")
 @app.route("/detect", methods=["POST"])
 def detect():
     """Endpoint to run animal detection on images"""
+    # Initialize temp_files at the beginning of the function
+    temp_files = []
+    
     try:
         # Get request data
         data = request.get_json()
@@ -186,7 +190,6 @@ def detect():
 
         # Prepare payload
         speciesnet_payload = {"instances": []}
-        temp_files = []
 
         for instance in instances:
             if "image" not in instance:
@@ -251,7 +254,12 @@ def detect():
                 os.remove(temp_file)
             except OSError:
                 pass
-        abort(500, description=f"Server error: {str(e)}")
+        
+        # Handle the specific JSON parsing error
+        if isinstance(e, werkzeug.exceptions.BadRequest):
+            abort(400, description="Invalid JSON in request body")
+        else:
+            abort(500, description=f"Server error: {str(e)}")
 
 # Detect GPUs at startup
 detect_gpus()
