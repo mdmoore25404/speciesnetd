@@ -65,10 +65,18 @@ def detect_gpus():
 # Detect GPUs at startup
 detect_gpus()
 
-# Configure SpeciesNet import based on GPU settings
-if USE_GPU_DETECTOR == "false" and USE_GPU_CLASSIFIER == "false":
+# Configure GPU environment variables based on settings
+if USE_GPU_DETECTOR == "false":
+    # Disable PyTorch GPU
+    logger.info("Disabling PyTorch/detector GPU via environment variable")
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    logger.info("Disabled GPU access for both PyTorch and TensorFlow")
+
+if USE_GPU_CLASSIFIER == "false":
+    # Disable TensorFlow GPU
+    logger.info("Disabling TensorFlow/classifier GPU via environment variable")
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 # Import SpeciesNet after GPU configuration
 from speciesnet import SpeciesNet
@@ -83,41 +91,33 @@ def get_detector() -> SpeciesNet:
     global _detector
     if (_detector is None):
         logger.info("Initializing detector...")
-        # Use GPU for detector based on settings
-        use_gpu = USE_GPU_DETECTOR == "true" or (USE_GPU_DETECTOR == "auto" and gpu_info["pytorch"]["available"])
+        # FIXED: Remove use_gpu parameter
         _detector = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
-                              components="detector", 
-                              multiprocessing=True,
-                              use_gpu=use_gpu)
-        logger.info(f"Detector initialized with GPU: {use_gpu}")
+                             components="detector", 
+                             multiprocessing=True)
+        logger.info(f"Detector initialized with PyTorch GPU available: {gpu_info['pytorch']['available']}")
     return _detector
 
 def get_classifier() -> SpeciesNet:
     global _classifier
     if (_classifier is None):
         logger.info("Initializing classifier...")
-        # Use GPU for classifier based on settings
-        use_gpu = USE_GPU_CLASSIFIER == "true" or (USE_GPU_CLASSIFIER == "auto" and gpu_info["tensorflow"]["available"])
+        # FIXED: Remove use_gpu parameter
         _classifier = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
-                                components="classifier", 
-                                multiprocessing=True,
-                                use_gpu=use_gpu)
-        logger.info(f"Classifier initialized with GPU: {use_gpu}")
+                               components="classifier", 
+                               multiprocessing=True)
+        logger.info(f"Classifier initialized with TensorFlow GPU available: {gpu_info['tensorflow']['available']}")
     return _classifier
 
 def get_ensemble() -> SpeciesNet:
     global _ensemble
     if (_ensemble is None):
         logger.info("Initializing ensemble...")
-        # Use both or prioritize detector (PyTorch) for ensemble
-        use_gpu = (USE_GPU_DETECTOR == "true" or USE_GPU_CLASSIFIER == "true" or 
-                   (USE_GPU_DETECTOR == "auto" and gpu_info["pytorch"]["available"]) or
-                   (USE_GPU_CLASSIFIER == "auto" and gpu_info["tensorflow"]["available"]))
+        # FIXED: Remove use_gpu parameter
         _ensemble = SpeciesNet(model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
-                             components="ensemble", 
-                             multiprocessing=True,
-                             use_gpu=use_gpu)
-        logger.info(f"Ensemble initialized with GPU: {use_gpu}")
+                            components="ensemble", 
+                            multiprocessing=True)
+        logger.info(f"Ensemble initialized with PyTorch GPU: {gpu_info['pytorch']['available']}, TensorFlow GPU: {gpu_info['tensorflow']['available']}")
     return _ensemble
 
 app = Flask(__name__)
