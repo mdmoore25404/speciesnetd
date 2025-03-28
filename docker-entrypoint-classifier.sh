@@ -43,6 +43,11 @@ else
   echo "SpeciesNet package is already installed."
 fi
 
+
+echo "CHECKING GPU"
+
+python gpu_test.py
+
 # Execute the command passed to the script or use the default
 if [ "$1" = "flask" ]; then
   echo "Starting Flask development server"

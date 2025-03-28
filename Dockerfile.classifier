@@ -31,6 +31,9 @@ COPY classifierd.py common.py ./
 COPY run-classifier.sh ./run.sh
 RUN chmod +x run.sh
 
+COPY gpu_test.py .
+RUN chmod +x gpu_test.py
+
 # Create necessary directory
 RUN mkdir -p /tmp/shared_temp && chmod 1777 /tmp/shared_temp
 
