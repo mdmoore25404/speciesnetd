@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("classifierd")
 
 # Configure GPU environment variables
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"           # Reduce TensorFlow logging
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"           # Only show warnings and errors, not info
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"   # Prevent TF from grabbing all GPU memory
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"     # Match CUDA device IDs to hardware order
 
@@ -63,12 +63,26 @@ gpu_info = {"tensorflow": {"available": False, "device_count": 0, "error": None}
 def detect_gpus():
     """Detect available TensorFlow GPUs"""
     try:
+        # Check CUDA environment variables
+        logger.info("CUDA Environment Variables:")
+        for env_var in ['CUDA_VISIBLE_DEVICES', 'LD_LIBRARY_PATH', 'NVIDIA_DRIVER_CAPABILITIES', 
+                        'NVIDIA_VISIBLE_DEVICES', 'CUDA_HOME', 'TF_FORCE_GPU_ALLOW_GROWTH']:
+            logger.info(f"  {env_var}: {os.environ.get(env_var, 'not set')}")
+        
+        # Try to directly check NVIDIA GPUs
+        try:
+            import subprocess
+            result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, text=True)
+            logger.info(f"nvidia-smi output:\n{result.stdout}")
+        except Exception as e:
+            logger.warning(f"Failed to run nvidia-smi: {e}")
+        
         import tensorflow as tf
         # Print TensorFlow version for debugging
         logger.info(f"TensorFlow version: {tf.__version__}")
         
-        # Force device placement logging
-        tf.debugging.set_log_device_placement(True)
+        # Disable verbose device placement logging
+        tf.debugging.set_log_device_placement(False)  # Change to False
         
         # Get TensorFlow GPU info
         gpus = tf.config.list_physical_devices('GPU')
@@ -110,6 +124,37 @@ def detect_gpus():
     
     logger.info(f"GPU detection results: {gpu_info}")
     return gpu_info
+
+def force_gpu_test():
+    """Last resort attempt to use GPU"""
+    try:
+        import tensorflow as tf
+        import numpy as np
+        
+        # Create a small test model
+        logger.info("Creating test model to verify GPU usage")
+        inputs = tf.keras.layers.Input(shape=(224, 224, 3))
+        x = tf.keras.layers.Conv2D(16, 3, activation='relu')(inputs)
+        x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        outputs = tf.keras.layers.Dense(10, activation='softmax')(x)
+        model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        
+        # Compile and test
+        model.compile(optimizer='adam', loss='categorical_crossentropy')
+        test_input = np.random.random((1, 224, 224, 3))
+        result = model.predict(test_input)
+        
+        logger.info(f"Test model prediction shape: {result.shape}")
+        logger.info("Test model execution completed - check if it used GPU")
+        
+        # Check if any ops ran on GPU
+        gpu_devices = tf.config.list_logical_devices('GPU')
+        logger.info(f"Available GPU devices after test: {gpu_devices}")
+        
+        return len(gpu_devices) > 0
+    except Exception as e:
+        logger.error(f"GPU force test failed: {e}")
+        return False
 
 # Create Flask app
 app = Flask(__name__)
@@ -166,35 +211,68 @@ def ready():
 app.register_blueprint(health_bp)
 
 def get_classifier():
-    """Initialize the classifier model if needed and return it"""
     global _classifier, _initialization_error, gpu_info
     if _classifier is None:
         logger.info("Initializing classifier...")
         try:
-            # Lazy import to reduce startup memory
-            from speciesnet import SpeciesNet
+            # Force TensorFlow to reinitialize its device detection
+            import os
+            os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+            os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+            os.environ['TF_GPU_THREAD_COUNT'] = '1'
+            
+            # Import TensorFlow and explicitly initialize CUDA
             import tensorflow as tf
+            from speciesnet import SpeciesNet
             
-            # Configure TensorFlow to use GPU if available
+            # More aggressive GPU configuration
             if USE_GPU:
-                logger.info("Configuring TensorFlow for GPU usage")
-                gpus = tf.config.list_physical_devices('GPU')
-                if gpus:
-                    # Set memory growth
-                    for gpu in gpus:
-                        try:
-                            tf.config.experimental.set_memory_growth(gpu, True)
-                        except Exception as e:
-                            logger.warning(f"Could not set memory growth: {e}")
+                # Try a different GPU configuration approach
+                logger.info("Trying alternative GPU configuration")
+                try:
+                    # Try rebuilding the GPU devices list
+                    physical_devices = tf.config.list_physical_devices('GPU')
+                    if not physical_devices:
+                        logger.warning("No physical GPUs detected, trying to force device detection")
+                        
+                        # Try to force GPU detection using environment variables
+                        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+                        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+                        
+                        # Reload TensorFlow to apply environment variables
+                        import importlib
+                        importlib.reload(tf)
+                        
+                        # Check again
+                        physical_devices = tf.config.list_physical_devices('GPU')
+                        if physical_devices:
+                            logger.info(f"Force-detected GPUs: {physical_devices}")
+                    
+                    if physical_devices:
+                        # Enable memory growth for all GPUs
+                        for device in physical_devices:
+                            tf.config.experimental.set_memory_growth(device, True)
+                        logger.info("Memory growth enabled for all GPUs")
+                
+                except Exception as e:
+                    logger.warning(f"Error in alternative GPU configuration: {e}")
             
-            # Initialize classifier
+            # Use XLA compilation for better performance
+            os.environ["TF_XLA_FLAGS"] = "--tf_xla_auto_jit=2"
+            
+            # Initialize with explicit device control
+            logger.info("Initializing SpeciesNet classifier with explicit GPU control")
             _classifier = SpeciesNet(
                 model_name="kaggle:google/speciesnet/keras/v4.0.0a", 
                 components="classifier", 
                 multiprocessing=False
             )
+            
+            # Check if TensorFlow found a GPU after initialization
+            gpu_info["tensorflow"]["available"] = len(tf.config.list_physical_devices('GPU')) > 0
             logger.info(f"Classifier initialized with TensorFlow GPU: {gpu_info['tensorflow']['available']}")
             _initialization_error = None
+            
         except Exception as e:
             _initialization_error = str(e)
             logger.warning(f"Error loading classifier: {e}")
@@ -307,7 +385,7 @@ def classify():
             
             result = classifier.classify(
                 instances_dict=payload,
-                run_mode='multi_thread',
+                run_mode='multi_thread',  # Using multi_thread instead of multi_process
                 progress_bars=False
             )
             
