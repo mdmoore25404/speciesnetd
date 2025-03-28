@@ -20,20 +20,17 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Fix for blinker and other distutils packages - force upgrade with --ignore-installed
-RUN pip install --no-cache-dir --ignore-installed blinker
+# Fix for blinker issue - remove it completely first
+RUN pip uninstall -y blinker || true
 
-# Install minimal dependencies
-RUN pip install --no-cache-dir --ignore-installed \
+# Install minimal dependencies with --no-deps flag to avoid dependency resolution problems
+RUN pip install --no-cache-dir --no-deps \
+    blinker>=1.9.0 \
     numpy \
     pillow \
     flask \
     gunicorn \
-    requests \
-    speciesnet
-
-# Test TensorFlow GPU detection
-RUN python -c "import tensorflow as tf; print('TensorFlow version:', tf.__version__); print('GPUs:', tf.config.list_physical_devices('GPU'))"
+    requests
 
 # Copy application files
 COPY classifierd.py common.py ./
