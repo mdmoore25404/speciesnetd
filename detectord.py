@@ -177,7 +177,7 @@ def detect():
     """Endpoint to run animal detection on images"""
     # Initialize temp_files at the beginning of the function
     temp_files = []
-    
+    start_time= time.time()
     try:
         # Get request data with better error handling
         try:
@@ -263,12 +263,18 @@ def detect():
 
         # Process with SpeciesNet
         try:
+            logger.info(f"getting to the get detector state took {time.time() - start_time:.2f} seconds")
+            detector_start_time = time.time()
             detector = get_detector()
+            logger.info(f"Detector init took {time.time() - detector_start_time:.2f}s")
+            
+            detect_start = time.time()
             result = detector.detect(
                 instances_dict=speciesnet_payload, 
                 run_mode='multi_thread',
                 progress_bars=False
             )
+            logger.info(f"Detection took {time.time() - detect_start:.2f}s")
             
             # Remove filepaths from results
             for p in result["predictions"]:
