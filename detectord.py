@@ -21,10 +21,13 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("detectord")
 
 # Near the top of the file, add this debug flag
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 if DEBUG:
     logger.setLevel(logging.DEBUG)
     logger.info("Debug mode enabled - verbose logging activated")
+else:
+    logger.setLevel(logging.INFO)
+    logger.info("Debug mode disabled - normal logging activated")
 
 # Configure GPU environment variables
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"           # Reduce TensorFlow logging
