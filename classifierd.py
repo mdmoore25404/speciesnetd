@@ -16,28 +16,29 @@ from flask import Flask, request, jsonify, abort, Blueprint
 import werkzeug.exceptions
 import sys
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                   stream=sys.stdout)  # Ensure logs go to stdout
-logger = logging.getLogger("classifierd")
+# Set up logging - remove duplicate handlers
+import sys
 
-# Enable werkzeug logging
-werkzeug_logger = logging.getLogger('werkzeug')
-werkzeug_logger.setLevel(logging.DEBUG)
+# First check if the logger already has handlers to prevent duplicates
+logger = logging.getLogger("classifierd")
+if not logger.handlers:
+    # Only configure logging if it hasn't been set up
+    logging.basicConfig(level=logging.INFO, 
+                       format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                       stream=sys.stdout)  # Ensure logs go to stdout
+
+    # Enable werkzeug logging
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_logger.setLevel(logging.DEBUG)
+else:
+    # Reset logger level if already configured
+    logger.setLevel(logging.INFO)
 
 # Near the top of the file, add this debug flag
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 if DEBUG:
     logger.setLevel(logging.DEBUG)
-    # Add handlers to ensure logs go to both file and console
-    if not logger.handlers:
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        logger.addHandler(console_handler)
-    
+    # REMOVED: Don't add extra handlers if DEBUG is true
     logger.info("Debug mode enabled - verbose logging activated")
 else:
     logger.setLevel(logging.INFO)
