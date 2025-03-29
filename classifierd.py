@@ -14,11 +14,34 @@ import multiprocessing
 import socket
 from flask import Flask, request, jsonify, abort, Blueprint
 import werkzeug.exceptions
+import sys
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                   stream=sys.stdout)  # Ensure logs go to stdout
 logger = logging.getLogger("classifierd")
+
+# Enable werkzeug logging
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.DEBUG)
+
+# Near the top of the file, add this debug flag
+DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+if DEBUG:
+    logger.setLevel(logging.DEBUG)
+    # Add handlers to ensure logs go to both file and console
+    if not logger.handlers:
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(console_handler)
+    
+    logger.info("Debug mode enabled - verbose logging activated")
+else:
+    logger.setLevel(logging.INFO)
+    logger.info("Debug mode disabled - normal logging activated")
 
 # Configure GPU environment variables
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"           # Only show warnings and errors, not info
@@ -310,12 +333,30 @@ logger.info(f"Created temp directory: {TEMP_DIR}")
 @app.route("/classify", methods=["POST"])
 def classify():
     """Endpoint to run species classification on images"""
+    # Log immediately when request is received
+    print(f"CLASSIFY RECEIVED: {time.asctime()} - {request.method} {request.path}", flush=True)
+    sys.stdout.flush()  # Force flush stdout
+    
     # Initialize temp_files at the beginning of the function
     temp_files = []
+    start_time = time.time()
+    
+    if DEBUG:
+        logger.debug(f"==== CLASSIFYING STARTED at {time.asctime()} ====")
+        logger.debug(f"Request headers: {dict(request.headers)}")
+        logger.debug(f"Request method: {request.method}")
+        logger.debug(f"Content-Type: {request.content_type}")
+        logger.debug(f"Content-Length: {request.content_length}")
     
     try:
         # Get request data with better error handling
         try:
+            if DEBUG:
+                logger.debug("Processing JSON request")
+                raw_data = request.get_data(as_text=True)
+                logger.debug(f"Raw data length: {len(raw_data)}")
+                logger.debug(f"Raw preview: {raw_data[:200]}...")
+                
             data = request.get_json()
             if data is None and request.content_length:
                 # This means we received data but it's not valid JSON
@@ -458,6 +499,87 @@ def classify():
         else:
             return jsonify({"error": f"Server error: {str(e)}"}), 500
 
+@app.route("/ping", methods=["GET", "POST"])
+def ping():
+    """Simple endpoint to test connectivity"""
+    logger.info(f"PING received: {request.method}")
+    print(f"PING ECHO: {time.asctime()} - {request.method}", flush=True)
+    
+    # Return details about the request
+    return jsonify({
+        "status": "ok",
+        "service": "classifierd",
+        "time": time.asctime(),
+        "method": request.method,
+        "headers": dict(request.headers),
+        "content_type": request.content_type,
+        "content_length": request.content_length
+    })
+
+@app.route("/debug_request", methods=["POST"])
+def debug_request():
+    """Debug endpoint to echo back request details with detailed JSON error analysis"""
+    response_data = {
+        "content_type": request.content_type,
+        "content_length": request.content_length,
+        "headers": dict(request.headers),
+        "json_status": "unknown"
+    }
+    
+    # Get raw request data
+    try:
+        raw_data = request.get_data(as_text=True)
+        response_data["raw_data_preview"] = raw_data[:200] + "..." if len(raw_data) > 200 else raw_data
+        response_data["raw_data_length"] = len(raw_data)
+        
+        # Check for special characters in raw data
+        suspicious_chars = []
+        for i, char in enumerate(raw_data[:1000]):  # Check first 1000 chars
+            if not char.isprintable() or char in ['"', '\\']:
+                suspicious_chars.append({
+                    "position": i,
+                    "char": repr(char),
+                    "ord": ord(char),
+                    "context": raw_data[max(0, i-10):min(len(raw_data), i+10)]
+                })
+        
+        if suspicious_chars:
+            response_data["suspicious_characters"] = suspicious_chars[:20]  # Limit to first 20
+    
+        # Try to parse JSON
+        try:
+            json_data = json.loads(raw_data)
+            response_data["json_status"] = "valid"
+            response_data["json_structure"] = {
+                "top_level_keys": list(json_data.keys()) if isinstance(json_data, dict) else "not a dict",
+                "instances_count": len(json_data.get("instances", [])) if isinstance(json_data, dict) else 0,
+                "detections_count": len(json_data.get("detections", [])) if isinstance(json_data, dict) else 0
+            }
+        except json.JSONDecodeError as e:
+            response_data["json_status"] = "invalid"
+            response_data["json_error"] = {
+                "message": str(e),
+                "line": e.lineno,
+                "column": e.colno,
+                "position": e.pos,
+                "error_type": e.__class__.__name__
+            }
+            
+            # Show context around error position
+            if hasattr(e, 'pos') and e.pos < len(raw_data):
+                start = max(0, e.pos - 50)
+                end = min(len(raw_data), e.pos + 50)
+                response_data["error_context"] = {
+                    "before": raw_data[start:e.pos],
+                    "position": e.pos,
+                    "character_at_position": repr(raw_data[e.pos]) if e.pos < len(raw_data) else None,
+                    "after": raw_data[e.pos:end]
+                }
+    except Exception as e:
+        response_data["error"] = str(e)
+    
+    return jsonify(response_data)
+
 # Detect GPUs at startup
 detect_gpus()
 
@@ -472,4 +594,8 @@ if INIT_AT_STARTUP:
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5002))
     logger.info(f"Starting classifier service on port {port}, GPU={USE_GPU}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    
+    # Log that we're about to start
+    print(f"STARTING CLASSIFIER SERVER on port {port} at {time.asctime()}", flush=True)
+    
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
