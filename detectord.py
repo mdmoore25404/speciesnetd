@@ -20,6 +20,12 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("detectord")
 
+# Near the top of the file, add this debug flag
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+if DEBUG:
+    logger.setLevel(logging.DEBUG)
+    logger.info("Debug mode enabled - verbose logging activated")
+
 # Configure GPU environment variables
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"           # Reduce TensorFlow logging
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"   # Prevent TF from grabbing all GPU memory
@@ -174,105 +180,102 @@ logger.info(f"Created temp directory: {TEMP_DIR}")
 
 @app.route("/detect", methods=["POST"])
 def detect():
-    """Endpoint to run animal detection on images"""
+    """Endpoint to run animal detection on images - multipart/form-data only"""
     # Initialize temp_files at the beginning of the function
     temp_files = []
-    start_time= time.time()
+    start_time = time.time()
+    
+    if DEBUG:
+        logger.debug(f"==== DETECTING STARTED at {time.asctime()} ====")
+        logger.debug(f"Request headers: {dict(request.headers)}")
+        logger.debug(f"Request method: {request.method}")
+        logger.debug(f"Content-Type: {request.content_type}")
+        logger.debug(f"Content-Length: {request.content_length}")
+    
     try:
-        # Get request data with better error handling
-        try:
-            raw_data = request.get_data(as_text=True)
-            logger.info(f"Raw length: {len(raw_data)}, Content-Length: {request.content_length}")
-            logger.info(f"Raw preview: {raw_data[:200]}")
-            if len(raw_data) < request.content_length:
-                logger.error("Truncated request!")
-                
-            data = request.get_json()
-            if data is None and request.content_length:
-                # This means we received data but it's not valid JSON
-                raw_data = request.get_data(as_text=True)
-                preview = raw_data[:100] + '...' if len(raw_data) > 100 else raw_data
-                logger.error(f"Received invalid JSON: {preview}")
-                return jsonify({"error": "Invalid JSON format in request body"}), 400
-        except werkzeug.exceptions.BadRequest as e:
-            # Extract the original JSON error if available
-            error_message = str(e)
-            if hasattr(e, '__cause__') and e.__cause__ is not None:
-                error_message = f"JSON parsing error: {str(e.__cause__)}"
-            logger.error(f"Bad request: {error_message}")
-            return jsonify({"error": error_message}), 400
+        # Check content type is multipart/form-data
+        if not request.content_type or 'multipart/form-data' not in request.content_type:
+            error_msg = "Only multipart/form-data is accepted. Please upload files directly."
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 415  # Unsupported Media Type
+            
+        if DEBUG:
+            logger.debug("Processing multipart form upload")
+            logger.debug(f"Form keys: {list(request.form.keys())}")
+            logger.debug(f"Files keys: {list(request.files.keys())}")
         
-        if not data or "instances" not in data:
-            return jsonify({"error": "Request must contain an 'instances' array"}), 400
-
-        instances = data["instances"]
-        if not isinstance(instances, list):
-            return jsonify({"error": "'instances' must be a list"}), 400
-
+        # Process files directly
+        files = request.files.getlist('image') or []
+        if not files:
+            files = request.files.getlist('file') or []
+            
+        if DEBUG:
+            logger.debug(f"Found {len(files)} uploaded files")
+            
+        if not files:
+            return jsonify({"error": "No files uploaded. Use 'image' or 'file' as the form field."}), 400
+            
         # Prepare payload
         speciesnet_payload = {"instances": []}
-
-        for instance in instances:
-            if "image" not in instance:
-                abort(400, description="Each instance must contain an 'image' key")
-
-            # Decode base64 image - try URL-safe first since that's what clients use
-            base64_string = instance["image"]
-            try:
-                try:
-                    # Try URL-safe first since clients always use this format
-                    image_data = base64.urlsafe_b64decode(base64_string)
-                except Exception as e:
-                    # Fall back to standard base64 (rarely needed, but good for compatibility)
-                    logger.debug(f"URL-safe base64 decode failed, trying standard: {str(e)}")
-                    try:
-                        image_data = base64.b64decode(base64_string)
-                    except Exception as e2:
-                        logger.error(f"Base64 decoding failed: URL-safe error: {e}, standard error: {e2}")
-                        return jsonify({"error": f"Invalid base64 data: {str(e2)}"}), 400
-            except Exception as e:
-                logger.exception(f"Unexpected error in base64 decoding")
-                return jsonify({"error": f"Base64 processing error: {str(e)}"}), 400
             
-            # After successful base64 decoding
-            try:
-                # Quick validation that decoded data is actually an image
-                from PIL import Image
-                import io
-                try:
-                    img = Image.open(io.BytesIO(image_data))
-                    img.verify()  # Verify it's a valid image
-                except Exception as e:
-                    logger.warning(f"Decoded base64 is not a valid image: {str(e)}")
-                    return jsonify({"error": "Decoded data is not a valid image"}), 400
-            except ImportError:
-                # If PIL is not available, skip this validation
-                pass
+        for uploaded_file in files:
+            if DEBUG:
+                logger.debug(f"Processing file: {uploaded_file.filename}, "
+                           f"content_type: {uploaded_file.content_type}, "
+                           f"size: {request.content_length}")
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(
                 delete=False, dir=TEMP_DIR, suffix=".jpg"
             )
-            temp_files.append(temp_file.name)            
+            temp_files.append(temp_file.name)
             
-            with open(temp_file.name, "wb") as f:
-                f.write(image_data)
-
+            # Save the uploaded file
+            uploaded_file.save(temp_file.name)
+            
+            # Validate image if PIL is available
+            try:
+                from PIL import Image
+                try:
+                    img = Image.open(temp_file.name)
+                    img.verify()  # Verify it's a valid image
+                    if DEBUG:
+                        logger.debug(f"Image validated: {img.format}, {img.size}")
+                except Exception as e:
+                    logger.warning(f"File is not a valid image: {str(e)}")
+                    return jsonify({"error": "Uploaded file is not a valid image"}), 400
+            except ImportError:
+                # If PIL is not available, skip this validation
+                pass
+            
             # Create instance for SpeciesNet
-            speciesnet_instance = {"filepath": temp_file.name}
-            # Copy metadata
-            for key in instance:
-                if key != "image":
-                    speciesnet_instance[key] = instance[key]
-
+            speciesnet_instance = {
+                "filepath": temp_file.name,
+                "filename": uploaded_file.filename
+            }
+            
+            # Copy form data as metadata if available
+            for key in request.form:
+                if key != "image" and key != "file":
+                    speciesnet_instance[key] = request.form[key]
+                    
             speciesnet_payload["instances"].append(speciesnet_instance)
-
+            
+            if DEBUG:
+                logger.debug(f"Saved to temp file: {temp_file.name}")
+                # Log file size
+                file_size = os.path.getsize(temp_file.name)
+                logger.debug(f"File size: {file_size} bytes")
+                
         # Process with SpeciesNet
         try:
-            logger.info(f"getting to the get detector state took {time.time() - start_time:.2f} seconds")
+            logger.info(f"Image preprocessing took {time.time() - start_time:.2f} seconds")
             detector_start_time = time.time()
             detector = get_detector()
             logger.info(f"Detector init took {time.time() - detector_start_time:.2f}s")
+            
+            if DEBUG:
+                logger.debug(f"About to detect on {len(speciesnet_payload['instances'])} images")
             
             detect_start = time.time()
             result = detector.detect(
@@ -287,15 +290,26 @@ def detect():
                 if "filepath" in p:
                     del p["filepath"]
 
+            if DEBUG:
+                logger.debug(f"Detection completed with {len(result.get('predictions', []))} predictions")
+                
         except Exception as e:
+            logger.exception("Error in detection processing")
             return jsonify({"error": f"Detection error: {str(e)}"}), 500
 
         # Clean up
         for temp_file in temp_files:
             try:
                 os.remove(temp_file)
-            except OSError:
+                if DEBUG:
+                    logger.debug(f"Removed temp file: {temp_file}")
+            except OSError as e:
+                if DEBUG:
+                    logger.debug(f"Failed to remove temp file: {temp_file}, error: {e}")
                 pass
+                
+        # Add timing info
+        result["processing_time"] = time.time() - start_time
                 
         return jsonify(result)
 
@@ -308,11 +322,7 @@ def detect():
             except OSError:
                 pass
         
-        # Return a structured error response
-        if isinstance(e, werkzeug.exceptions.BadRequest):
-            return jsonify({"error": "Invalid JSON in request body"}), 400
-        else:
-            return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 @app.route("/debug_request", methods=["POST"])
 def debug_request():
