@@ -181,6 +181,12 @@ def detect():
     try:
         # Get request data with better error handling
         try:
+            raw_data = request.get_data(as_text=True)
+            logger.info(f"Raw length: {len(raw_data)}, Content-Length: {request.content_length}")
+            logger.info(f"Raw preview: {raw_data[:200]}")
+            if len(raw_data) < request.content_length:
+                logger.error("Truncated request!")
+                
             data = request.get_json()
             if data is None and request.content_length:
                 # This means we received data but it's not valid JSON
@@ -271,7 +277,7 @@ def detect():
             detect_start = time.time()
             result = detector.detect(
                 instances_dict=speciesnet_payload, 
-                run_mode='multi_thread',
+                run_mode='single_thread',
                 progress_bars=False
             )
             logger.info(f"Detection took {time.time() - detect_start:.2f}s")
