@@ -280,7 +280,7 @@ def detect():
             detect_start = time.time()
             result = detector.detect(
                 instances_dict=speciesnet_payload, 
-                run_mode='single_thread',
+                run_mode='multi_thread',
                 progress_bars=False
             )
             logger.info(f"Detection took {time.time() - detect_start:.2f}s")

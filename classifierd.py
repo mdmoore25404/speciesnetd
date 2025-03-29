@@ -422,7 +422,7 @@ def classify():
             classifier = get_classifier()
             result = classifier.classify(
                 instances_dict=speciesnet_payload, 
-                run_mode='single_thread',
+                run_mode='multi_thread',
                 progress_bars=False
             )
             
