@@ -12,12 +12,13 @@ VENV_DIR="/workspace/venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment in $VENV_DIR..."
     python -m venv "$VENV_DIR"
-    source "$VENV_DIR/bin/activate"
-    pip install --no-cache-dir speciesnet || echo "Warning: Could not install speciesnet"
 else
-    echo "Using existing virtual environment from $VENV_DIR..."
-    source "$VENV_DIR/bin/activate"
+    echo "Using existing virtual environment from $VENV_DIR..."    
 fi
+
+
+source "$VENV_DIR/bin/activate"
+pip install --no-cache-dir speciesnet || echo "Warning: Could not install speciesnet"
 
 # echo "TENSORFLOW VERSION"
 # pip show tensorflow
