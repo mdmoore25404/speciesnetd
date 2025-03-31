@@ -190,6 +190,7 @@ def detect():
     
     if DEBUG:
         logger.debug(f"==== DETECTING STARTED at {time.asctime()} ====")
+        logger.debug(f"request ip: {request.remote_addr}")
         logger.debug(f"Request headers: {dict(request.headers)}")
         logger.debug(f"Request method: {request.method}")
         logger.debug(f"Content-Type: {request.content_type}")

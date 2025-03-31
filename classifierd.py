@@ -336,6 +336,7 @@ def classify():
     """Endpoint to run species classification on images"""
     # Log immediately when request is received
     print(f"CLASSIFY RECEIVED: {time.asctime()} - {request.method} {request.path}", flush=True)
+    print(f"Request source ip: {request.remote_addr}", flush=True)
     sys.stdout.flush()  # Force flush stdout
     
     # Initialize temp_files at the beginning of the function
@@ -345,6 +346,7 @@ def classify():
     if DEBUG:
         logger.debug(f"==== CLASSIFYING STARTED at {time.asctime()} ====")
         logger.debug(f"Request headers: {dict(request.headers)}")
+        logger.debug(f"Request source ip: {request.remote_addr}", flush=True)
         logger.debug(f"Request method: {request.method}")
         logger.debug(f"Content-Type: {request.content_type}")
         logger.debug(f"Content-Length: {request.content_length}")
