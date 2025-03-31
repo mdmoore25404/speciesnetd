@@ -14,11 +14,11 @@ ENV PYTHONUNBUFFERED=1 \
     INIT_AT_STARTUP=false \
     SHARED_TEMP_DIR=/tmp/shared_temp \
     MULTIPROCESSING_SEMAPHORES=0 \
-    PYTHONPATH="/app"
+    PYTHONPATH="/app:/workspace/venv/lib/python3.11/site-packages"
 
 WORKDIR /app
 
-# Install minimal dependencies
+# Install minimal dependencies in base image
 RUN pip install --no-cache-dir \
     numpy \
     pillow \

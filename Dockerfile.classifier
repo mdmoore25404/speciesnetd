@@ -14,7 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     INIT_AT_STARTUP=false \
     SHARED_TEMP_DIR=/tmp/shared_temp \
     MULTIPROCESSING_SEMAPHORES=0 \
-    PYTHONPATH="/app" \
+    PYTHONPATH="/app:/workspace/venv/lib/python3.11/site-packages" \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
@@ -38,8 +38,6 @@ RUN pip install --no-cache-dir --no-deps \
     flask \
     gunicorn \
     requests
-
-
 
 # Copy application files
 COPY classifierd.py common.py ./

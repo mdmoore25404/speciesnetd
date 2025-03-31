@@ -7,18 +7,23 @@ echo "Starting SpeciesNet Service with GPU=${USE_GPU}"
 mkdir -p /tmp/shared_temp
 chmod 1777 /tmp/shared_temp
 
-# Install SpeciesNet if needed - pip will skip if already installed
-pip install --no-cache-dir speciesnet || echo "Warning: Could not install speciesnet"
+# Set up virtual environment in /workspace for speciesnet
+VENV_DIR="/workspace/venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment in $VENV_DIR..."
+    python -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    pip install --no-cache-dir speciesnet || echo "Warning: Could not install speciesnet"
+else
+    echo "Using existing virtual environment from $VENV_DIR..."
+    source "$VENV_DIR/bin/activate"
+fi
 
+# echo "TENSORFLOW VERSION"
+# pip show tensorflow
 
-echo "TENSORFLOW VERSION"
-
-pip show tensorflow
-
-
-echo "CHECKING GPU"
-
-python gpu_test.py
+# echo "CHECKING GPU"
+# python gpu_test.py
 
 # Run the application
 exec "$@"
