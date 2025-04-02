@@ -80,6 +80,10 @@ def detect_gpus():
 # Create Flask app
 app = Flask(__name__)
 
+# Add these configuration settings
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # Limit to 100MB uploads
+app.config['REQUEST_TIMEOUT'] = 120  
+
 # Create health blueprint
 health_bp = Blueprint('health', __name__)
 
@@ -202,19 +206,15 @@ def detect():
             error_msg = "Only multipart/form-data is accepted. Please upload files directly."
             logger.error(error_msg)
             return jsonify({"error": error_msg}), 415  # Unsupported Media Type
-            
-        if DEBUG:
-            logger.debug("Processing multipart form upload")
-            logger.debug(f"Form keys: {list(request.form.keys())}")
-            logger.debug(f"Files keys: {list(request.files.keys())}")
         
-        # Process files directly
+        # Set a reasonable size limit for requests
+        if request.content_length and request.content_length > 100 * 1024 * 1024:  # 100MB
+            return jsonify({"error": "File too large, maximum size is 100MB"}), 413
+            
+        # Process files efficiently - stream directly to disk
         files = request.files.getlist('image') or []
         if not files:
             files = request.files.getlist('file') or []
-            
-        if DEBUG:
-            logger.debug(f"Found {len(files)} uploaded files")
             
         if not files:
             return jsonify({"error": "No files uploaded. Use 'image' or 'file' as the form field."}), 400
