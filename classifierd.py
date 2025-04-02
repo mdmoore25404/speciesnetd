@@ -346,7 +346,7 @@ def classify():
     if DEBUG:
         logger.debug(f"==== CLASSIFYING STARTED at {time.asctime()} ====")
         logger.debug(f"Request headers: {dict(request.headers)}")
-        logger.debug(f"Request source ip: {request.remote_addr}", flush=True)
+        logger.debug(f"Request source ip: {request.remote_addr}")
         logger.debug(f"Request method: {request.method}")
         logger.debug(f"Content-Type: {request.content_type}")
         logger.debug(f"Content-Length: {request.content_length}")
