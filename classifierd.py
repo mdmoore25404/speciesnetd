@@ -15,8 +15,12 @@ import socket
 from flask import Flask, request, jsonify, abort, Blueprint
 import werkzeug.exceptions
 import sys
+import tensorflow as tf
+import gc  # At the start of your file
 
+# Print TensorFlow version for debugging
 # Set up logging - remove duplicate handlers
+
 import sys
 
 # First check if the logger already has handlers to prevent duplicates
@@ -84,6 +88,7 @@ _classifier = None
 _start_time = time.time()
 _initialization_error = None
 gpu_info = {"tensorflow": {"available": False, "device_count": 0, "error": None}}
+_tf_initialized = False
 
 def detect_gpus():
     """Detect available TensorFlow GPUs"""
@@ -102,8 +107,7 @@ def detect_gpus():
         except Exception as e:
             logger.warning(f"Failed to run nvidia-smi: {e}")
         
-        import tensorflow as tf
-        # Print TensorFlow version for debugging
+
         logger.info(f"TensorFlow version: {tf.__version__}")
         
         # Disable verbose device placement logging
@@ -181,6 +185,20 @@ def force_gpu_test():
         logger.error(f"GPU force test failed: {e}")
         return False
 
+def configure_tensorflow_gpu():
+    import tensorflow as tf
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        # Set memory limit for each GPU
+        try:
+            for gpu in gpus:
+                tf.config.set_logical_device_configuration(
+                    gpu,
+                    [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]  # Limit to 4GB
+                )
+        except Exception as e:
+            logger.warning(f"Could not set GPU memory limit: {e}")
+
 # Create Flask app
 app = Flask(__name__)
 
@@ -236,7 +254,13 @@ def ready():
 app.register_blueprint(health_bp)
 
 def get_classifier():
-    global _classifier, _initialization_error, gpu_info
+    global _classifier, _initialization_error, gpu_info, _tf_initialized
+    
+    if not _tf_initialized:
+        # Initialize TensorFlow once
+        configure_tensorflow_gpu()
+        _tf_initialized = True
+    
     if _classifier is None:
         logger.info("Initializing classifier...")
         try:
@@ -432,7 +456,10 @@ def classify():
                     import io
                     try:
                         img = Image.open(io.BytesIO(image_data))
-                        img.verify()  # Verify it's a valid image
+                        try:
+                            img.verify()  # Verify it's a valid image
+                        finally:
+                            img.close()  # Ensure image is closed
                     except Exception as e:
                         logger.warning(f"Decoded base64 is not a valid image: {str(e)}")
                         return jsonify({"error": "Decoded data is not a valid image"}), 400
@@ -485,6 +512,7 @@ def classify():
             except OSError:
                 pass
                 
+        gc.collect()  # At the end of classify()
         return jsonify(result)
         
     except Exception as e:
