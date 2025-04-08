@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install speciesnet and core dependencies
+RUN pip install --no-cache-dir \
+    speciesnet \
+    numpy \
+    pillow \
+    flask \
+    gunicorn \
+    requests
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    USE_GPU=true
