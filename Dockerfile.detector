@@ -1,44 +1,14 @@
-FROM python:3.11-slim
-
-# Install minimal system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PORT=5001 \
-    USE_GPU=true \
-    INIT_AT_STARTUP=false \
-    SHARED_TEMP_DIR=/tmp/shared_temp \
-    MULTIPROCESSING_SEMAPHORES=0 \
-    PYTHONPATH="/app:/workspace/venv/lib/python3.11/site-packages"
+FROM mdmoore25404/speciesnet-base:latest
 
 WORKDIR /app
 
-# Install minimal dependencies in base image
-RUN pip install --no-cache-dir \
-    numpy \
-    pillow \
-    flask \
-    gunicorn \
-    requests
+# Install RunPod dependency
+RUN pip install --no-cache-dir runpod
 
-# Copy application files
 COPY detectord.py common.py ./
 COPY run-detector.sh ./run.sh
 RUN chmod +x run.sh
 
-# Create necessary directory
 RUN mkdir -p /tmp/shared_temp && chmod 1777 /tmp/shared_temp
 
-# Expose port
-EXPOSE 5001
-
-# Use run.sh as entrypoint
-ENTRYPOINT ["./run.sh"]
-
-# Default command
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "300", "--workers", "1", "detectord:app"]
+CMD ["python", "detectord.py"]

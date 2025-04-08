@@ -7,9 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies and clean up
-RUN pip uninstall -y blinker || true && \
-    pip install --no-cache-dir \
+# Install Python dependencies, forcing overwrite of distutils packages
+RUN pip install --no-cache-dir --ignore-installed \
     blinker>=1.9.0 \
     itsdangerous>=2.2.0 \
     Jinja2>=3.1.2 \

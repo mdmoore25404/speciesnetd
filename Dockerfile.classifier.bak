@@ -1,0 +1,11 @@
+FROM mdmoore25404/cuda-speciesnet-base:latest
+WORKDIR /app
+RUN pip install --no-cache-dir runpod
+COPY classifierd.py common.py ./
+COPY run-classifier.sh ./run.sh
+RUN chmod +x run.sh
+RUN mkdir -p /tmp/shared_temp && chmod 1777 /tmp/shared_temp
+ENV PATH=/usr/local/cuda-12.2/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH \
+    XLA_FLAGS=--xla_gpu_cuda_data_dir=/usr/local/cuda-12.2
+CMD ["python", "classifierd.py"]
