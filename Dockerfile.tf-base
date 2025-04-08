@@ -1,0 +1,30 @@
+FROM tensorflow/tensorflow:2.15.0-gpu
+
+# Install system dependencies and clean up
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies and clean up
+RUN pip uninstall -y blinker || true && \
+    pip install --no-cache-dir \
+    blinker>=1.9.0 \
+    itsdangerous>=2.2.0 \
+    Jinja2>=3.1.2 \
+    Werkzeug>=3.0.0 \
+    click>=8.1.3 \
+    numpy \
+    pillow \
+    flask \
+    gunicorn \
+    requests \
+    && rm -rf /root/.cache/pip
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    USE_GPU=true \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
