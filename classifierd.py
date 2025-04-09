@@ -86,13 +86,55 @@ def handler(event):
 
 if os.getenv("RUN_LOCAL", "false").lower() == "true":
     if __name__ == "__main__":
+        from flask import Flask, request, jsonify
+        import os
+
+        app = Flask(__name__)
+
+        @app.route("/runsync", methods=["POST"])
+        def runsync():
+            try:
+                event = request.json
+                os.makedirs("/tmp/shared_temp", exist_ok=True)
+                result = handler(event)
+                return jsonify(result)
+            except Exception as e:
+                logger.error(f"Flask endpoint error: {e}")
+                return jsonify({"error": str(e)})
+                
+        @app.route("/health", methods=["GET"])
+        def health():
+            return jsonify({
+                "jobs": {
+                    "completed": 4,
+                    "failed": 0,
+                    "inProgress": 0,
+                    "inQueue": 0,
+                    "retried": 0
+                },
+                "workers": {
+                    "idle": 1,
+                    "initializing": 0,
+                    "ready": 1,
+                    "running": 0,
+                    "throttled": 0,
+                    "unhealthy": 0
+                }
+            })
+
+        # Run a simple test on startup
         logger.info("Running local test...")
         with open("test.jpg", "rb") as f:
             image_b64 = base64.b64encode(f.read()).decode()
         test_event = {"input": {"image": image_b64}}
         os.makedirs("/tmp/shared_temp", exist_ok=True)
         result = handler(test_event)
-        print(result)
+        print("Test result:", result)
+        
+        # Start the Flask server
+        print("Starting Flask server on http://localhost:5002")
+        print("Health endpoint available at http://localhost:5002/health")
+        app.run(host="0.0.0.0", port=5002)
 else:
     import runpod
     logger.info("Starting RunPod Serverless...")
